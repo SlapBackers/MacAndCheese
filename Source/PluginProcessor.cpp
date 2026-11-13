@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Core/TruePeak.h"
+#include <numeric>
 
 namespace
 {
@@ -30,6 +31,7 @@ MatchMasterProcessor::MatchMasterProcessor()
     pTruePeak = apvts.getRawParameterValue ("truePeak");
     pCeiling = apvts.getRawParameterValue ("ceiling");
     pClip = apvts.getRawParameterValue ("clip");
+    pLevelMatch = apvts.getRawParameterValue ("levelMatch");
     pProfile = apvts.getRawParameterValue ("profile");
     for (auto& b : slotBusy)
         b = false;
@@ -68,6 +70,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MatchMasterProcessor::create
     l.add (std::make_unique<F> (juce::ParameterID { "loudness", 1 }, "Loudness", percent, 100.0f, pct));
     l.add (std::make_unique<F> (juce::ParameterID { "clip", 1 }, "Clip", juce::NormalisableRange<float> (0.0f, 6.0f, 0.1f), 0.0f, db));
     l.add (std::make_unique<B> (juce::ParameterID { "limiter", 1 }, "Limiter", true));
+    // monitoring switch: hear the EQ match only, at the original track's loudness (not automatable)
+    l.add (std::make_unique<B> (juce::ParameterID { "levelMatch", 1 }, "Level Match", false,
+                                juce::AudioParameterBoolAttributes().withAutomatable (false)));
     l.add (std::make_unique<B> (juce::ParameterID { "truePeak", 1 }, "True Peak", true));
     l.add (std::make_unique<F> (juce::ParameterID { "ceiling", 1 }, "Ceiling", juce::NormalisableRange<float> (-6.0f, 0.0f, 0.1f), -1.0f, db));
     return l;
@@ -177,6 +182,18 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         if (clipOn) // clip the top clipDb of the peaks, never below the limiter's ceiling
             clipPointDb = juce::jmax (ceilingDb, estPeakDb + preDb - clipDb);
     }
+    const bool levelMatch = pLevelMatch->load() > 0.5f;
+    if (levelMatch)
+    {
+        // EQ match only, kept at the track's own loudness: undo the level change the EQ causes (measured at Learn)
+        preDb = ! matched ? 0.0f : exactEqLevelValid.load() ? -exactEqLevelDb.load() : -activeEqLevelDb.load() * eqAmt;
+        postDb = 0.0f;
+        clipPointDb = clipOffDb;
+        suggestionDb.store (0.0f);
+    }
+    // Clipper -> clean gain -> limiter: clipping at T then adding G is identical to adding G then clipping at T+G,
+    // which is how it's computed here; preDb is the clean gain the user sees between the two stages.
+    gainIntoLimiterDb.store (levelMatch ? 0.0f : preDb);
     loudGain.setTargetValue (juce::Decibels::decibelsToGain (preDb));
     finalGain.setTargetValue (juce::Decibels::decibelsToGain (postDb));
     clipThresholdDb.setTargetValue (clipPointDb);
@@ -220,7 +237,7 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         }
 
         float* chans[2] = { l, r };
-        limiter.process (chans, r != nullptr ? 2 : 1, n, limOn);
+        limiter.process (chans, r != nullptr ? 2 : 1, n, limOn && ! levelMatch);
         for (int i = 0; i < n; ++i)
         {
             const float fg = finalGain.getNextValue();
@@ -321,6 +338,14 @@ void MatchMasterProcessor::startLearning()
     captureRate = hostRate;
     capturePos = 0;
     learnState = LearnState::listening;
+    learnDeviationDb = -1.0f;
+    learnEnough = false;
+    lastLearnCheck = 0.0;
+    if (! learnCheckPending.load())
+    {
+        lastLearnBands.clear();
+        learnStableChecks = 0;
+    }
     setMessage ({}, false);
     capturing.store (true, std::memory_order_release);
 }
@@ -361,6 +386,66 @@ void MatchMasterProcessor::stopLearning()
             setMessage (juce::String ("Learn: ") + e.what(), true);
         }
         learnState = LearnState::idle;
+    });
+}
+
+// Learn quality: re-run the track analysis on what has been captured so far and see whether the
+// spectrum of the loudest parts (what the match is built from) has stopped changing.
+void MatchMasterProcessor::checkLearnQuality()
+{
+    constexpr double checkEvery = 4.0, minSeconds = 30.0;
+    constexpr float stableDb = 0.5f;
+    const double secs = getCaptureSeconds();
+    if (secs < 8.0 || secs - lastLearnCheck < checkEvery || learnCheckPending.load())
+        return;
+    lastLearnCheck = secs;
+    const int n = capturePos.load();
+    learnCheckPending = true;
+
+    pool.addJob ([this, n, secs, rate = captureRate]
+    {
+        try
+        {
+            // the audio thread only writes beyond capturePos, so [0, n) is stable while listening
+            juce::AudioBuffer<float> view (capture.getArrayOfWritePointers(), 2, n);
+            const auto t = mm::analyzeTarget (mm::toStereoAtRate (view, rate, config.sampleRate), config);
+
+            // 1/3-octave bands, 31.5 Hz - 16 kHz, shape only (mean removed)
+            std::vector<float> bands;
+            const double binHz = config.sampleRate / config.fftSize;
+            for (int k = -15; k <= 12; ++k)
+            {
+                const double fc = 1000.0 * std::pow (2.0, k / 3.0);
+                const int lo = juce::jmax (1, (int) (fc / std::pow (2.0, 1.0 / 6.0) / binHz));
+                const int hi = juce::jmin ((int) t.midSpectrum.size() - 1, juce::jmax (lo, (int) (fc * std::pow (2.0, 1.0 / 6.0) / binHz)));
+                double p = 0;
+                for (int b = lo; b <= hi; ++b)
+                    p += t.midSpectrum[(size_t) b] * t.midSpectrum[(size_t) b];
+                bands.push_back ((float) (10.0 * std::log10 (p / (hi - lo + 1) + 1e-20)));
+            }
+            const float mean = std::accumulate (bands.begin(), bands.end(), 0.0f) / (float) bands.size();
+            for (auto& b : bands)
+                b -= mean;
+            const float loudDb = (float) juce::Decibels::gainToDecibels (t.matchRms, -100.0);
+
+            float dev = -1.0f;
+            if (lastLearnBands.size() == bands.size())
+            {
+                dev = std::abs (loudDb - lastLearnLoudDb);
+                for (size_t i = 0; i < bands.size(); ++i)
+                    dev = juce::jmax (dev, std::abs (bands[i] - lastLearnBands[i]));
+            }
+            lastLearnBands = bands;
+            lastLearnLoudDb = loudDb;
+            learnStableChecks = dev >= 0.0f && dev < stableDb ? learnStableChecks + 1 : 0;
+            if (learnState == LearnState::listening)
+            {
+                learnDeviationDb = dev;
+                learnEnough = learnStableChecks >= 2 && secs >= minSeconds;
+            }
+        }
+        catch (const std::exception&) {}
+        learnCheckPending = false;
     });
 }
 
@@ -468,7 +553,17 @@ MatchMasterProcessor::Snapshot MatchMasterProcessor::getSnapshot() const
     if (s.messageIsError)
         s.message = message;
     else if (learnState == LearnState::listening)
-        s.message = "Listening - play the loudest part of your track, then press Stop";
+    {
+        const float dev = learnDeviationDb.load();
+        if (learnEnough.load())
+            s.message = "Enough - the sound of your track is stable, you can press Stop";
+        else if (dev < 0.0f)
+            s.message = "Listening - play the loudest part of your track";
+        else if (dev < 0.5f)
+            s.message = "Almost there - keep playing (at least 30 s, loudest part included)";
+        else
+            s.message = "Keep playing - the sound is still changing (" + juce::String (dev, 1) + " dB). Include the loudest part";
+    }
     else if (learnState == LearnState::analysing)
         s.message = "Matching your track to the references...";
     else if (! anyRef && track == nullptr)
@@ -490,6 +585,8 @@ void MatchMasterProcessor::timerCallback()
 {
     if (learnState == LearnState::listening && ! capturing.load())
         stopLearning(); // capture buffer filled up
+    if (learnState == LearnState::listening)
+        checkLearnQuality();
 
     const int active = getActiveSlot();
     if (resultsChanged.exchange (false) || active != shownSlot)
@@ -502,7 +599,7 @@ void MatchMasterProcessor::timerCallback()
         updateLatency();
     }
 
-    if (pLimiter->load() < 0.5f)
+    if (pLimiter->load() < 0.5f || pLevelMatch->load() > 0.5f)
         updateHeadroom();
 }
 
@@ -528,6 +625,7 @@ void MatchMasterProcessor::updateHeadroom()
         return;
     lastPeakKey = key;
     exactPeakValid = false;
+    exactEqLevelValid = false;
     peakJobPending = true;
 
     pool.addJob ([this, src, t, midAmt, sideAmt, maxCorr, natural, key]
@@ -550,8 +648,12 @@ void MatchMasterProcessor::updateHeadroom()
         for (size_t i = 0; i < m.size(); ++i) { l[i] = m[i] + sd[i]; r[i] = m[i] - sd[i]; }
         const float pk = std::max (mm::TruePeakDetector::measure (l.data(), (int) l.size()),
                                    mm::TruePeakDetector::measure (r.data(), (int) r.size()));
+        const float levelDb = (float) juce::Decibels::gainToDecibels (
+            mm::loudestPiecesRms (m, t->pieceSize, t->divisions) / juce::jmax (1e-9, t->matchRms), -100.0);
         if (key == lastPeakKey)
         {
+            exactEqLevelDb = levelDb;
+            exactEqLevelValid = true;
             exactPeakDb = juce::Decibels::gainToDecibels (pk, -120.0f) + 0.8f; // margin: measured at 44.1 kHz, plays at the host rate
             exactPeakValid = true;
         }
@@ -577,6 +679,7 @@ void MatchMasterProcessor::applyActiveSlot (bool forceFirs)
     if (src != nullptr)
     {
         activeGainDb = (float) juce::Decibels::gainToDecibels (src->totalGain(), -100.0);
+        activeEqLevelDb = (float) src->eqLevelDb;
         activeRefDb = (float) juce::Decibels::gainToDecibels (src->finalAmplitudeCoef, -100.0);
         activeTrackPeakDb = (float) src->trackPeakDb;
         activeEqPeakDb = (float) src->eqPeakDb;
@@ -711,6 +814,7 @@ void MatchMasterProcessor::getStateInformation (juce::MemoryBlock& dest)
                 mt.setProperty ("sideMatching", toBlob (m->sideMatching), nullptr);
                 mt.setProperty ("trackPeakDb", m->trackPeakDb, nullptr);
                 mt.setProperty ("eqPeakDb", m->eqPeakDb, nullptr);
+                mt.setProperty ("eqLevelDb", m->eqLevelDb, nullptr);
                 mt.setProperty ("rmsCoefficient", m->rmsCoefficient, nullptr);
                 mt.setProperty ("correctionGain", m->correctionGain, nullptr);
                 mt.setProperty ("finalAmplitudeCoef", m->finalAmplitudeCoef, nullptr);
@@ -787,6 +891,7 @@ void MatchMasterProcessor::setStateInformation (const void* data, int size)
             m->sideMatching = fromBlob<double> (mt["sideMatching"]);
             m->trackPeakDb = mt["trackPeakDb"];
             m->eqPeakDb = mt["eqPeakDb"];
+            m->eqLevelDb = mt.getProperty ("eqLevelDb", 0.0);
             m->rmsCoefficient = mt["rmsCoefficient"];
             m->correctionGain = mt["correctionGain"];
             m->finalAmplitudeCoef = mt["finalAmplitudeCoef"];
@@ -805,6 +910,7 @@ void MatchMasterProcessor::setStateInformation (const void* data, int size)
     }
     lastPeakKey = {};
     exactPeakValid = false;
+    exactEqLevelValid = false;
     resultsChanged = true;
 }
 

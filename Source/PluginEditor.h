@@ -52,7 +52,8 @@ namespace ui
     public:
         std::function<void()> onClick;
         MatchMasterProcessor::LearnState state = MatchMasterProcessor::LearnState::idle;
-        bool learned = false;
+        bool learned = false, enough = false;
+        float deviation = -1.0f; // learn quality: spectrum change between checks, dB
         double seconds = 0, maxSeconds = 1;
         float pulse = 0;
 
@@ -75,7 +76,7 @@ namespace ui
     class Meter : public juce::Component
     {
     public:
-        float l = 0, r = 0, gr = 1;
+        float l = 0, r = 0, gr = 1, clipDb = 0; // gr: limiter gain (linear), clipDb: clipper reduction
         void paint (juce::Graphics&) override;
     };
 }
@@ -111,13 +112,14 @@ private:
 
     // limiter strip (always visible)
     juce::ToggleButton limiterButton { "Limiter" }, truePeakButton { "True peak" };
+    juce::TextButton levelMatchButton { "Level match" };
     juce::Slider ceilingSlider, clipSlider;
     juce::Label ceilingLabel, clipLabel, limiterReadout;
 
     using Attachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
     std::unique_ptr<Attachment> matchAtt, midAtt, sideAtt, loudAtt, smoothAtt, corrAtt, ceilingAtt, clipAtt;
-    std::unique_ptr<ButtonAtt> limiterAtt, truePeakAtt;
+    std::unique_ptr<ButtonAtt> limiterAtt, truePeakAtt, levelMatchAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;
 
     bool advanced = false;

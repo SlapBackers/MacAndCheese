@@ -405,6 +405,12 @@ ReferenceProfile analyzeReference (const juce::AudioBuffer<float>& buf, const Co
     return ref;
 }
 
+double loudestPiecesRms (const std::vector<float>& signal, int pieceSize, int divisions)
+{
+    std::vector<int> loud;
+    return loudestPieces (pieceRmses (signal, Pieces { pieceSize, divisions }), loud);
+}
+
 TargetProfile analyzeTarget (const juce::AudioBuffer<float>& buf, const Config& cfg)
 {
     if (buf.getNumSamples() < cfg.fftSize * 2)
@@ -481,14 +487,16 @@ MatchResult match (const TargetProfile& tgt, const ReferenceProfile& ref, const 
         res.eqPeakDb = stereoPeakDb (midEq, sideEq);
     }
 
+    const Pieces p { tgt.pieceSize, tgt.divisions };
+    std::vector<int> loud;
+    res.eqLevelDb = juce::Decibels::gainToDecibels (loudestPieces (pieceRmses (midEq, p), loud) / std::max ((double) cfg.minValue, tgt.matchRms), -100.0);
+
     // stages.__correct_levels: iterate on the clipped, EQ'd mid signal
     std::vector<float> resultMid (std::move (midEq));
     for (auto& v : resultMid)
         v *= (float) res.rmsCoefficient;
 
-    const Pieces p { tgt.pieceSize, tgt.divisions };
     std::vector<float> clipped (resultMid.size());
-    std::vector<int> loud;
     for (int step = 0; step < cfg.rmsCorrectionSteps; ++step)
     {
         for (size_t i = 0; i < resultMid.size(); ++i)

@@ -148,8 +148,8 @@ void LearnButton::paint (juce::Graphics& g)
 
     g.setColour (listening ? colours::rec.withAlpha (0.16f) : colours::panel.brighter (isMouseOver() ? 0.06f : 0.0f));
     g.fillRoundedRectangle (r, 8.0f);
-    g.setColour (listening ? colours::rec : colours::line.brighter (0.3f));
-    g.drawRoundedRectangle (r, 8.0f, 1.5f);
+    g.setColour (listening ? (enough ? colours::accent2 : colours::rec) : colours::line.brighter (0.3f));
+    g.drawRoundedRectangle (r, 8.0f, enough && listening ? 2.5f : 1.5f);
 
     auto inner = getLocalBounds().reduced (14, 0);
     auto icon = inner.removeFromLeft (26).toFloat().withSizeKeepingCentre (16, 16);
@@ -158,6 +158,7 @@ void LearnButton::paint (juce::Graphics& g)
     else g.fillEllipse (icon);
 
     juce::String text = listening ? "Stop  " + juce::String ((int) seconds / 60) + ":" + juce::String ((int) seconds % 60).paddedLeft ('0', 2)
+                                        + (enough ? "   -   enough" : deviation >= 0.0f ? "   -   keep playing" : "")
                       : state == LS::analysing ? juce::String ("Matching...")
                       : learned ? juce::String ("Re-learn your track") : juce::String ("Learn your track");
     g.setColour (colours::text);
@@ -167,7 +168,7 @@ void LearnButton::paint (juce::Graphics& g)
     if (listening)
     {
         auto bar = getLocalBounds().toFloat().reduced (10, 0).removeFromBottom (4).translated (0, -4);
-        g.setColour (colours::rec);
+        g.setColour (enough ? colours::accent2 : colours::rec);
         g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * (float) juce::jlimit (0.0, 1.0, seconds / maxSeconds)), 2.0f);
     }
 }
@@ -252,7 +253,7 @@ void Meter::paint (juce::Graphics& g)
     const float peakR = r;
     auto area = getLocalBounds().toFloat();
     auto labels = area.removeFromBottom (16);
-    const float w = (area.getWidth() - 8) / 3.0f;
+    const float w = (area.getWidth() - 12) / 4.0f;
     auto toNorm = [] (float lin) { return juce::jlimit (0.0f, 1.0f, (juce::Decibels::gainToDecibels (lin, -60.0f) + 60.0f) / 60.0f); };
 
     auto bar = [&] (juce::Rectangle<float> b, float norm, juce::Colour c, bool fromTop)
@@ -265,14 +266,16 @@ void Meter::paint (juce::Graphics& g)
     };
     bar ({ area.getX(), area.getY(), w, area.getHeight() }, toNorm (l), colours::accent2, false);
     bar ({ area.getX() + w + 4, area.getY(), w, area.getHeight() }, toNorm (peakR), colours::accent2, false);
+    // gain reduction bars, 0-12 dB, drawn from the top: clipper then limiter
     const float grDb = -juce::Decibels::gainToDecibels (gr, -24.0f);
-    bar ({ area.getX() + 2 * (w + 4), area.getY(), w, area.getHeight() }, juce::jlimit (0.0f, 1.0f, grDb / 12.0f), colours::accent, true);
+    bar ({ area.getX() + 2 * (w + 4), area.getY(), w, area.getHeight() }, juce::jlimit (0.0f, 1.0f, clipDb / 12.0f), colours::accent, true);
+    bar ({ area.getX() + 3 * (w + 4), area.getY(), w, area.getHeight() }, juce::jlimit (0.0f, 1.0f, grDb / 12.0f), colours::accent, true);
 
     g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
-    g.drawText ("L", labels.withX (area.getX()).withWidth (w), juce::Justification::centred);
-    g.drawText ("R", labels.withX (area.getX() + w + 4).withWidth (w), juce::Justification::centred);
-    g.drawText ("GR", labels.withX (area.getX() + 2 * (w + 4)).withWidth (w), juce::Justification::centred);
+    g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+    const char* names[] = { "L", "R", "CLIP", "LIM" };
+    for (int i = 0; i < 4; ++i)
+        g.drawText (names[i], labels.withX ((int) (area.getX() + i * (w + 4)) - 4).withWidth ((int) w + 8), juce::Justification::centred);
 }
 
 // ================================================================== Editor
@@ -369,6 +372,10 @@ MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorE
 
     addAndMakeVisible (meter);
 
+    levelMatchButton.setClickingTogglesState (true);
+    levelMatchButton.setTooltip ("Hear only the EQ match, at your track's own loudness (no loudness push, clipper or limiter)");
+    addAndMakeVisible (levelMatchButton);
+    levelMatchAtt = std::make_unique<ButtonAtt> (vts, "levelMatch", levelMatchButton);
     advancedButton.setClickingTogglesState (true);
     advancedButton.onClick = [this] { setAdvanced (advancedButton.getToggleState()); };
     addAndMakeVisible (advancedButton);
@@ -419,6 +426,8 @@ void MatchMasterEditor::resized()
     auto r = getLocalBounds();
     auto header = r.removeFromTop (56).reduced (20, 14);
     advancedButton.setBounds (header.removeFromRight (100));
+    header.removeFromRight (10);
+    levelMatchButton.setBounds (header.removeFromRight (120));
 
     auto main = r.removeFromTop (simpleHeight - 56 - 88).reduced (20, 16);
     auto left = main.removeFromLeft (360);
@@ -434,7 +443,7 @@ void MatchMasterEditor::resized()
     left.removeFromTop (8);
     messageLabel.setBounds (left);
 
-    meter.setBounds (main.removeFromRight (54));
+    meter.setBounds (main.removeFromRight (90));
     main.removeFromRight (10);
     auto knobArea = main.reduced (6, 0);
     matchLabel.setBounds (knobArea.removeFromBottom (22));
@@ -489,6 +498,8 @@ void MatchMasterEditor::timerCallback()
     learnButton.state = proc.getLearnState();
     learnButton.learned = proc.hasLearnedTrack();
     learnButton.seconds = proc.getCaptureSeconds();
+    learnButton.enough = proc.learnEnough.load();
+    learnButton.deviation = proc.learnDeviationDb.load();
     learnButton.maxSeconds = proc.getMaxCaptureSeconds();
     learnButton.pulse = 0.5f + 0.5f * std::sin ((float) juce::Time::getMillisecondCounter() * 0.006f);
     learnButton.repaint();
@@ -500,24 +511,32 @@ void MatchMasterEditor::timerCallback()
     meter.r = proc.meterR.load();
     const float gr = proc.meterGr.exchange (1.0f);
     meter.gr = gr;
+    meter.clipDb = proc.clipDbNow.load();
     meter.repaint();
 
     auto fmt = [] (double db) { return (db >= 0 ? "+" : "") + juce::String (db, 1) + " dB"; };
     const bool limOn = limiterButton.getToggleState();
     truePeakButton.setEnabled (limOn);
+    // Clipper -> clean gain -> limiter, one stage per field
     juce::String lim;
-    if (clipSlider.getValue() > 0.01)
-        lim = "Clip  now " + juce::String (proc.clipDbNow.load(), 1) + " dB   max " + juce::String (proc.maxClipDb.load(), 1) + " dB     ";
-    if (limOn)
-        lim += "Limiter  now " + juce::String (juce::jmax (0.0f, -juce::Decibels::gainToDecibels (gr, -60.0f)), 1)
-              + " dB   max " + juce::String (proc.maxGrDb.load(), 1) + " dB";
-    else if (proc.suggestionDb.load() > 0.05f)
-        lim += "To match the reference: " + fmt (proc.suggestionDb.load()) + " into your limiter, ceiling "
-              + juce::String (ceilingSlider.getValue(), 1) + " dBTP";
+    const bool levelMatchOn = levelMatchButton.getToggleState();
+    if (levelMatchOn)
+        lim = "Level match: EQ only, at your track's loudness (no clipper, gain or limiter)";
     else
-        lim += "Limiter off - output kept under the ceiling";
+    {
+        lim = (clipSlider.getValue() > 0.01 ? "Clip " + juce::String (proc.clipDbNow.load(), 1) + " dB (max " + juce::String (proc.maxClipDb.load(), 1) + ")"
+                                            : juce::String ("Clip off"))
+              + "   >   Gain " + fmt (proc.gainIntoLimiterDb.load()) + "   >   ";
+        if (limOn)
+            lim += "Limiter " + juce::String (juce::jmax (0.0f, -juce::Decibels::gainToDecibels (gr, -60.0f)), 1)
+                   + " dB (max " + juce::String (proc.maxGrDb.load(), 1) + ")";
+        else if (proc.suggestionDb.load() > 0.05f)
+            lim += "your limiter: push " + fmt (proc.suggestionDb.load()) + " more, ceiling " + juce::String (ceilingSlider.getValue(), 1) + " dBTP";
+        else
+            lim += "no limiter, kept under the ceiling";
+    }
     limiterReadout.setText (lim, juce::dontSendNotification);
-    limiterReadout.setColour (juce::Label::textColourId, limOn ? colours::dim : colours::accent);
+    limiterReadout.setColour (juce::Label::textColourId, levelMatchOn ? colours::accent2 : limOn ? colours::dim : colours::accent);
 
     if (advanced)
     {

@@ -75,6 +75,11 @@ public:
     std::atomic<float> meterL { 0.0f }, meterR { 0.0f }, meterGr { 1.0f }, maxGrDb { 0.0f };
     std::atomic<float> clipDbNow { 0.0f }, maxClipDb { 0.0f }; // dB shaved by the clipper
     std::atomic<float> suggestionDb { 0.0f }; // limiter off: gain still needed to match loudness
+    std::atomic<float> gainIntoLimiterDb { 0.0f }; // clean gain between clipper and limiter
+
+    // Learn quality: how much the learned spectrum still changes between checks (-1 = not measured yet)
+    std::atomic<float> learnDeviationDb { -1.0f };
+    std::atomic<bool> learnEnough { false };
 
     juce::AudioProcessorValueTreeState apvts;
 
@@ -118,6 +123,12 @@ private:
     std::atomic<bool> capturing { false };
     std::atomic<LearnState> learnState { LearnState::idle };
     double captureRate = 44100.0;
+    void checkLearnQuality();               // message thread, while listening
+    std::atomic<bool> learnCheckPending { false };
+    double lastLearnCheck = 0.0;            // seconds of capture at the last check
+    std::vector<float> lastLearnBands;      // worker thread
+    float lastLearnLoudDb = 0.0f;           // worker thread
+    int learnStableChecks = 0;              // worker thread
 
     // real-time engine (active slot)
     double hostRate = 44100.0;
@@ -142,13 +153,15 @@ private:
     juce::SmoothedValue<float> clipThresholdDb; // clip point, dB full scale
     float clipGainCache = -1.0f, clipInvCache = 1.0f, clipOver = 0.0f; // audio thread
     juce::SmoothedValue<float> loudGain, finalGain;
-    std::atomic<float> activeGainDb { 0.0f }, activeRefDb { 0.0f }, activeTrackPeakDb { 0.0f }, activeEqPeakDb { 0.0f };
+    std::atomic<float> activeGainDb { 0.0f }, activeEqLevelDb { 0.0f }, activeRefDb { 0.0f }, activeTrackPeakDb { 0.0f }, activeEqPeakDb { 0.0f };
     std::atomic<bool> activeMatched { false };
 
     // exact output peak of the learned track with the current EQ settings (limiter-off headroom)
     void updateHeadroom();
     std::atomic<bool> peakJobPending { false }, exactPeakValid { false };
     std::atomic<float> exactPeakDb { 0.0f };
+    std::atomic<bool> exactEqLevelValid { false };
+    std::atomic<float> exactEqLevelDb { 0.0f }; // level change of the current EQ settings (level-match monitor)
     juce::String lastPeakKey;
     float builtMid = -1.0f, builtSide = -1.0f, builtMaxCorr = -1.0f;
     int builtMode = -1;
@@ -167,6 +180,7 @@ private:
     std::atomic<float>* pTruePeak = nullptr;
     std::atomic<float>* pCeiling = nullptr;
     std::atomic<float>* pClip = nullptr;
+    std::atomic<float>* pLevelMatch = nullptr;
     std::atomic<float>* pProfile = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MatchMasterProcessor)

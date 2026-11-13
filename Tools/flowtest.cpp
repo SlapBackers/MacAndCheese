@@ -190,7 +190,31 @@ int main (int argc, char* argv[])
     proc->selectSlot (0);
     proc->startLearning();
     check (proc->getLearnState() == LS::listening, "Learn starts listening");
-    playThrough (*proc, track, nullptr);
+    {
+        // play in 2 s chunks, letting the GUI/timer run in between (like real time), up to two passes of the track
+        juce::MidiBuffer midi;
+        juce::AudioBuffer<float> block (2, 512);
+        const int chunk = (int) (2.0 * rate);
+        bool earlyEnough = false;
+        juce::String timeline;
+        for (int pass = 0; pass < 2 && ! proc->learnEnough.load(); ++pass)
+            for (int start = 0; start + chunk <= track.getNumSamples() && ! proc->learnEnough.load(); start += chunk)
+            {
+                for (int pos = start; pos + 512 <= start + chunk; pos += 512)
+                {
+                    for (int ch = 0; ch < 2; ++ch) block.copyFrom (ch, 0, track, ch, pos, 512);
+                    proc->processBlock (block, midi);
+                }
+                pump (250);
+                const double secs = proc->getCaptureSeconds();
+                if (secs <= 12.5 && proc->learnEnough.load()) earlyEnough = true;
+                if (proc->learnDeviationDb.load() >= 0.0f) timeline << juce::roundToInt (secs) << "s:" << juce::String (proc->learnDeviationDb.load(), 2) << " ";
+            }
+        std::cout << "  info  learn quality (spectrum change per check): " << timeline << "\n";
+        check (! earlyEnough, "Learn quality: not 'enough' after only 12 s");
+        check (proc->learnEnough.load(), "Learn quality: says 'enough' once the spectrum is stable (" + juce::String (proc->getCaptureSeconds(), 0) + " s)");
+        std::cout << "  info  message: " << proc->getSnapshot().message << "\n";
+    }
     pump (100);
     snapshot (*editor, outDir.getChildFile ("2-listening.png"));
     proc->stopLearning();
@@ -264,11 +288,26 @@ int main (int argc, char* argv[])
     check (std::abs (a.first - refLoud (refBright)) < 1.5, "A matches its reference loudness (" + juce::String (refLoud (refBright), 2) + " dB)");
     check (a.second <= -0.9f, "limiter holds the -1 dBTP ceiling");
 
+    // level-match monitor: EQ only, at the track's own loudness
+    {
+        auto* lm = proc->apvts.getParameter ("levelMatch");
+        lm->setValueNotifyingHost (1.0f);
+        pump (300);
+        auto lmOut = measure ("level match (EQ only)");
+        mm::Config c;
+        const double trackLoud = 20 * std::log10 (mm::analyzeTarget (mm::toStereoAtRate (track, rate, 44100), c).matchRms);
+        std::cout << "  info  original track loudness " << juce::String (trackLoud, 2) << " dB\n";
+        check (std::abs (lmOut.first - trackLoud) < 0.5, "Level match: EQ'd track at the original loudness");
+        lm->setValueNotifyingHost (0.0f);
+        pump (300);
+    }
+
     // clipper before the limiter
     auto setClip = [&] (float db) { auto* p = proc->apvts.getParameter ("clip"); p->setValueNotifyingHost (p->convertTo0to1 (db)); pump (300); };
     proc->maxGrDb = 0.0f; proc->maxClipDb = 0.0f;
     measure ("clip 0 dB");
     const float grNoClip = proc->maxGrDb.load();
+    check (proc->gainIntoLimiterDb.load() > 1.0f, "gain into the limiter shown (" + juce::String (proc->gainIntoLimiterDb.load(), 1) + " dB)");
     check (proc->maxClipDb.load() < 0.01f, "Clip 0 dB: clipper does nothing");
     setClip (3.0f);
     proc->maxGrDb = 0.0f; proc->maxClipDb = 0.0f;

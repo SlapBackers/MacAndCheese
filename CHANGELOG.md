@@ -2,6 +2,13 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MatchMaster/releases).
 
+## v2.1.1 — clearer output stages, level match, Learn quality
+
+- **Clipper → Gain → Limiter**, shown as three stages: CLIP and LIM gain-reduction meters next to L/R, and a readout like "Clip 2.0 dB > Gain +4.2 dB > Limiter 0.3 dB". The sound is unchanged from v2.1.0.
+- **Level match** button: hear only the EQ match at your track's own loudness (no loudness push, clipper or limiter), to judge the EQ fairly.
+- **Learn quality**: while listening, MatchMaster re-analyses what it has heard every 4 s and tells you "keep playing" or "enough" once the spectrum of the loudest parts has stopped changing (under 0.5 dB, at least 30 s).
+- Public [ROADMAP](ROADMAP.md).
+
 ## v2.1.0 — responsive knobs, clipper, saved with your project
 
 - **Knobs respond while you turn them.** Before, the EQ only changed when you released the mouse (in some hosts not at all until then). The EQ now runs on a new engine with its own filter-building thread and click-free crossfades. Latency +128 samples (≈ 3 ms).

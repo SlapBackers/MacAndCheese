@@ -18,10 +18,11 @@ Get the latest `MatchMaster-vX.Y.Z-macOS-VST3.zip` from **[Releases](https://git
 ## How it works
 
 1. **References** – drop up to 3 well-mastered songs into slots **A / B / C**.
-2. **Learn** – press Learn and play your track (at least 5 s, ideally the loudest part), then press Stop. One Learn matches all three profiles.
+2. **Learn** – press Learn and play your track, loudest part included. The button tells you when it has heard enough (the sound of your track has stopped changing); then press Stop. One Learn matches all three profiles.
 3. **Listen** – click A / B / C to compare. The match is applied live, non-destructively:
    - **Match** knob: 0 % = your original, 100 % = the full Matchering result
-   - **Clip** (0–6 dB, default 0): a clipper (Airwindows ClipOnly2) shaves that many dB off the loudest peaks before the limiter — punchier loudness, less limiting
+   - **Level match**: hear only the EQ match, at your track's own loudness — the fair way to judge the EQ (louder always sounds better)
+   - **Clipper → Gain → Limiter**: **Clip** (0–6 dB, default 0) shaves the loudest peaks (Airwindows ClipOnly2), a clean gain sets the level, the limiter catches what's left. CLIP and LIM meters show each stage's work
    - **Limiter** (visible, always under your control): on/off, true peak (default on), ceiling (default −1 dBTP), gain-reduction readout. With the limiter off, the output keeps its headroom and the plugin tells you how much gain to push into your own limiter to match the reference.
    - **Advanced**: matching EQ curve, Mid EQ / Side EQ / Loudness amounts, EQ **Smoothing**, **Max correction**, EQ mode **Linear** (phase-exact, ~92 ms latency) or **Natural** (no pre-echo, ~7 ms latency)
 
@@ -67,9 +68,7 @@ cmake --build build --target MatchMasterCLI MatchMasterFlowTest -j
 
 ## Roadmap
 
-- **v2.2 – Fix the mix**: a FIX section before the master — *Dynamic match* (per-band mid/side dynamics learned from a reference, cut-only by default), mono bass; optional separate "fix" reference
-- **v2.3 – Character**: Point (punch), PowerSag, Channel9, Acceleration/Slew, Stonefire (Airwindows)
-- **v3.0** – new GUI
+Where MatchMaster is going (fix-the-mix section, Airwindows character stage, new GUI) is in **[ROADMAP.md](ROADMAP.md)**.
 
 ## Credits & license
 

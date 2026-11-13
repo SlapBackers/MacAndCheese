@@ -56,6 +56,7 @@ struct MatchResult
     std::vector<double> midMatching, sideMatching; // raw (unsmoothed) reference / track ratios, for re-smoothing
     double trackPeakDb = 0.0;               // true peak of the learned track
     double eqPeakDb = 0.0;                  // true peak of the learned track after the matching EQ (unity gain)
+    double eqLevelDb = 0.0;                 // loudness change caused by the matching EQ alone (loudest pieces, mid)
     double rmsCoefficient = 1.0;            // loudness match (stage 1)
     double correctionGain = 1.0;            // product of RMS correction steps (stage 3)
     double finalAmplitudeCoef = 1.0;        // reference peak level, applied after the limiter
@@ -88,6 +89,9 @@ juce::AudioBuffer<float> toStereoAtRate (const juce::AudioBuffer<float>& in, dou
 // Same-mode FFT convolution (scipy.signal.fftconvolve(..., "same")).
 std::vector<float> convolveSame (const std::vector<float>& x, const std::vector<float>& h);
 
+
+// RMS of the loudest pieces (Matchering's loudness measure) of a mono signal, with a known piece layout.
+double loudestPiecesRms (const std::vector<float>& signal, int pieceSize, int divisions);
 
 // LOWESS fraction for a smoothing amount 0..1 (0 = Matchering's 0.0375, 1 = very broad).
 double lowessFracForSmoothing (double amount01);
