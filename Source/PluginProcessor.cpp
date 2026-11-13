@@ -24,7 +24,10 @@ MacAndCheeseProcessor::MacAndCheeseProcessor()
     pMatch = apvts.getRawParameterValue ("match");
     pMidEq = apvts.getRawParameterValue ("midEq");
     pSideEq = apvts.getRawParameterValue ("sideEq");
-    pLoudness = apvts.getRawParameterValue ("loudness");
+    pGain = apvts.getRawParameterValue ("gain");
+    pGainAuto = apvts.getRawParameterValue ("gainAuto");
+    pClipAuto = apvts.getRawParameterValue ("clipAuto");
+    pCeilingAuto = apvts.getRawParameterValue ("ceilingAuto");
     pSmoothing = apvts.getRawParameterValue ("smoothing");
     pMaxCorr = apvts.getRawParameterValue ("maxCorr");
     pEqMode = apvts.getRawParameterValue ("eqMode");
@@ -35,7 +38,6 @@ MacAndCheeseProcessor::MacAndCheeseProcessor()
     pLevelMatch = apvts.getRawParameterValue ("levelMatch");
     pUnclump = apvts.getRawParameterValue ("unclump");
     pMonoBase = apvts.getRawParameterValue ("monoBase");
-    pPrepWith = apvts.getRawParameterValue ("prepWith");
     pFluff = apvts.getRawParameterValue ("fluff");
     for (int b = 0; b < mm::prepBands; ++b)
         pBand[(size_t) b] = apvts.getRawParameterValue (bandIds[b]);
@@ -65,28 +67,31 @@ juce::AudioProcessorValueTreeState::ParameterLayout MacAndCheeseProcessor::creat
     const juce::NormalisableRange<float> percent (0.0f, 100.0f, 0.1f);
 
     juce::AudioProcessorValueTreeState::ParameterLayout l;
-    l.add (std::make_unique<F> (juce::ParameterID { "match", 1 }, "Cheesiness", percent, 100.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "match", 1 }, "Match", percent, 100.0f, pct));
     // PREP (fix the mix)
     l.add (std::make_unique<F> (juce::ParameterID { "unclump", 1 }, "Unclump", percent, 0.0f, pct));
-    l.add (std::make_unique<F> (juce::ParameterID { "monoBase", 1 }, "Mono Base", juce::NormalisableRange<float> (0.0f, 300.0f, 1.0f), 0.0f,
+    l.add (std::make_unique<F> (juce::ParameterID { "monoBase", 1 }, "Mono Bass", juce::NormalisableRange<float> (0.0f, 300.0f, 1.0f), 0.0f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 20.0f ? juce::String ("Off") : juce::String (juce::roundToInt (v)) + " Hz"; })));
-    l.add (std::make_unique<Ch> (juce::ParameterID { "prepWith", 1 }, "Prep With", juce::StringArray { "Same", "A", "B", "C" }, 0));
     for (int b = 0; b < mm::prepBands; ++b)
         l.add (std::make_unique<F> (juce::ParameterID { bandIds[b], 1 }, bandNames[b], percent, 100.0f, pct));
-    l.add (std::make_unique<B> (juce::ParameterID { "fluff", 1 }, "Fluff", false));
+    l.add (std::make_unique<B> (juce::ParameterID { "fluff", 1 }, "Allow Boosts", false));
     l.add (std::make_unique<Ch> (juce::ParameterID { "profile", 1 }, "Profile", slotNames, 0));
     // EQ
     l.add (std::make_unique<F> (juce::ParameterID { "midEq", 1 }, "Mid EQ", percent, 100.0f, pct));
     l.add (std::make_unique<F> (juce::ParameterID { "sideEq", 1 }, "Side EQ", percent, 100.0f, pct));
-    l.add (std::make_unique<F> (juce::ParameterID { "smoothing", 1 }, "Blend", percent, 0.0f, pct));
-    l.add (std::make_unique<F> (juce::ParameterID { "maxCorr", 1 }, "Max Seasoning", juce::NormalisableRange<float> (3.0f, 24.0f, 0.1f), 12.0f, db));
+    l.add (std::make_unique<F> (juce::ParameterID { "smoothing", 1 }, "EQ Smoothing", percent, 0.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "maxCorr", 1 }, "Max EQ", juce::NormalisableRange<float> (3.0f, 24.0f, 0.1f), 12.0f, db));
     l.add (std::make_unique<Ch> (juce::ParameterID { "eqMode", 1 }, "EQ Mode", juce::StringArray { "Linear", "Natural" }, 0));
     // loudness + limiter
-    l.add (std::make_unique<F> (juce::ParameterID { "loudness", 1 }, "Portion", percent, 100.0f, pct));
-    l.add (std::make_unique<F> (juce::ParameterID { "clip", 1 }, "Crisp", juce::NormalisableRange<float> (0.0f, 6.0f, 0.1f), 0.0f, db));
-    l.add (std::make_unique<B> (juce::ParameterID { "limiter", 1 }, "Lid", true));
+    // loudness: clipper -> gain -> limiter, each automatic or manual
+    l.add (std::make_unique<B> (juce::ParameterID { "clipAuto", 1 }, "Clip Auto", true));
+    l.add (std::make_unique<F> (juce::ParameterID { "clip", 1 }, "Clip", juce::NormalisableRange<float> (0.0f, 6.0f, 0.1f), 0.0f, db));
+    l.add (std::make_unique<B> (juce::ParameterID { "gainAuto", 1 }, "Gain Auto", true));
+    l.add (std::make_unique<F> (juce::ParameterID { "gain", 1 }, "Gain", juce::NormalisableRange<float> (-12.0f, 36.0f, 0.1f), 0.0f, db));
+    l.add (std::make_unique<B> (juce::ParameterID { "ceilingAuto", 1 }, "Ceiling Auto", true));
+    l.add (std::make_unique<B> (juce::ParameterID { "limiter", 1 }, "Limiter", true));
     // monitoring switch: hear the EQ match only, at the original track's loudness (not automatable)
-    l.add (std::make_unique<B> (juce::ParameterID { "levelMatch", 1 }, "Blind Taste", false,
+    l.add (std::make_unique<B> (juce::ParameterID { "levelMatch", 1 }, "Level Match", false,
                                 juce::AudioParameterBoolAttributes().withAutomatable (false)));
     l.add (std::make_unique<B> (juce::ParameterID { "truePeak", 1 }, "True Peak", true));
     l.add (std::make_unique<F> (juce::ParameterID { "ceiling", 1 }, "Ceiling", juce::NormalisableRange<float> (-6.0f, 0.0f, 0.1f), -1.0f, db));
@@ -164,41 +169,43 @@ void MacAndCheeseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // ---- gain staging
     const bool matched = activeMatched.load();
     const float match = matched ? pMatch->load() * 0.01f : 0.0f;
-    const float loud = pLoudness->load() * 0.01f;
     const bool limOn = pLimiter->load() > 0.5f;
-    const float ceilingDb = pCeiling->load();
+    const bool gainAuto = pGainAuto->load() > 0.5f, clipAuto = pClipAuto->load() > 0.5f;
+    const float ceilingDb = pCeilingAuto->load() > 0.5f ? -1.0f : pCeiling->load(); // auto: -1 dBTP
     limiter.setCeiling (juce::Decibels::decibelsToGain (ceilingDb));
     limiter.setTruePeak (pTruePeak->load() > 0.5f);
 
-    // Clip knob = dB the clipper shaves off the loudest peaks before the limiter (scaled by Match).
-    const float clipDb = matched ? pClip->load() * match : 0.0f;
-    const bool clipOn = clipDb > 0.01f;
     const float eqAmt = match * pMidEq->load() * 0.01f;
     const float estPeakDb = activeTrackPeakDb.load() + (activeEqPeakDb.load() - activeTrackPeakDb.load()) * eqAmt; // EQ'd track, unity gain
 
-    float preDb = activeGainDb.load() * match * loud;
+    // Gain: auto = the reference's loudness; manual = as set.  Clip: dB shaved off the loudest peaks before
+    // the limiter; auto = everything above the last 1 dB of limiting (max 6 dB).
+    float preDb = gainAuto ? activeGainDb.load() * match : pGain->load();
     float postDb = activeRefDb.load() * match;
-    float clipPointDb = clipOffDb;
+    float clipDb = ! matched ? 0.0f : clipAuto ? juce::jlimit (0.0f, 6.0f, estPeakDb + preDb - ceilingDb - 1.0f) : pClip->load() * match;
+    float floorDb = ceilingDb; // the clipper never clips below this
     if (! limOn)
     {
-        // no limiter: keep the output under the ceiling, report what's missing.
-        // With the clipper on, it clips 1 dB under the ceiling (room for its inter-sample overs).
-        const float targetDb = preDb + postDb;
-        const float peakDb = exactPeakValid.load() ? exactPeakDb.load() : estPeakDb + 2.0f; // estimate + margin until measured
-        const float topDb = clipOn ? ceilingDb - 1.0f : ceilingDb;
-        const float applied = matched ? juce::jmin (targetDb, topDb - peakDb + clipDb) : 0.0f;
-        suggestionDb.store (matched ? juce::jmax (0.0f, targetDb - applied) : 0.0f);
-        preDb = applied;
+        // no limiter: auto gain keeps the output under the ceiling (clipper 1 dB under it) and reports what's missing
+        suggestionDb.store (0.0f);
         postDb = 0.0f;
-        if (clipOn)
-            clipPointDb = topDb;
+        floorDb = ceilingDb - 1.0f;
+        if (gainAuto && matched)
+        {
+            const float targetDb = preDb + activeRefDb.load() * match;
+            const float peakDb = exactPeakValid.load() ? exactPeakDb.load() : estPeakDb + 2.0f; // estimate + margin until measured
+            if (clipAuto)
+                clipDb = juce::jlimit (0.0f, 6.0f, targetDb - (floorDb - peakDb));
+            const float topDb = clipDb > 0.01f ? floorDb : ceilingDb;
+            preDb = juce::jmin (targetDb, topDb - peakDb + clipDb);
+            suggestionDb.store (juce::jmax (0.0f, targetDb - preDb));
+        }
     }
     else
-    {
         suggestionDb.store (0.0f);
-        if (clipOn) // clip the top clipDb of the peaks, never below the limiter's ceiling
-            clipPointDb = juce::jmax (ceilingDb, estPeakDb + preDb - clipDb);
-    }
+    float clipPointDb = clipDb > 0.01f ? juce::jmax (floorDb, estPeakDb + preDb - clipDb) : clipOffDb;
+    effClipDb.store (clipDb);
+    effCeilingDb.store (ceilingDb);
     const bool levelMatch = pLevelMatch->load() > 0.5f;
     if (levelMatch)
     {
@@ -416,7 +423,7 @@ void MacAndCheeseProcessor::stopLearning()
         }
         catch (const std::exception& e)
         {
-            setMessage (juce::String ("Taste: ") + e.what(), true);
+            setMessage (juce::String ("Learn: ") + e.what(), true);
         }
         learnState = LearnState::idle;
     });
@@ -515,7 +522,7 @@ void MacAndCheeseProcessor::matchSlots (std::vector<int> which)
         {
             const juce::ScopedLock sl (dataLock);
             ref = slots[(size_t) i].ref;
-            rb = slots[(size_t) prepRefFor (i)].bands;
+            rb = slots[(size_t) i].bands; // one reference drives both the fix and the match
         }
         if (ref == nullptr)
             continue;
@@ -562,16 +569,10 @@ mm::PrepSettings MacAndCheeseProcessor::prepSettings() const
     return s;
 }
 
-int MacAndCheeseProcessor::prepRefFor (int slot) const
-{
-    const int with = juce::roundToInt (pPrepWith->load());
-    return with == 0 ? slot : with - 1;
-}
-
 void MacAndCheeseProcessor::applyPrepStats()
 {
     const juce::ScopedLock sl (dataLock);
-    prep.setStats (trackBands, slots[(size_t) prepRefFor (getActiveSlot())].bands); // tables only; a torn read lasts one control tick
+    prep.setStats (trackBands, slots[(size_t) getActiveSlot()].bands); // tables only; a torn read lasts one control tick
 }
 
 void MacAndCheeseProcessor::resmooth (double frac)
@@ -654,17 +655,17 @@ MacAndCheeseProcessor::Snapshot MacAndCheeseProcessor::getSnapshot() const
             s.message = "Keep playing - the sound is still changing (" + juce::String (dev, 1) + " dB). Include the loudest part";
     }
     else if (learnState == LearnState::analysing)
-        s.message = "Making the sauce...";
+        s.message = "Matching your track to the references...";
     else if (! anyRef && track == nullptr)
-        s.message = "Drop up to 3 great-sounding songs (the cheese) into A, B, C - then taste your mac (play your track)";
+        s.message = "Drop up to 3 great-sounding songs into A, B, C - then press Learn and play your track";
     else if (track == nullptr && restoredFromProject && s.slots[(size_t) active].matched)
-        s.message = "Restored from the project - taste again before loading a new cheese";
+        s.message = "Restored from the project - learn again before loading a new reference";
     else if (track == nullptr)
-        s.message = "Press Taste and play your track";
+        s.message = "Press Learn and play your track";
     else if (! s.slots[(size_t) active].loaded)
-        s.message = "Drop a song into cheese " + slotNames[active];
+        s.message = "Drop a song into reference " + slotNames[active];
     else if (s.slots[(size_t) active].matched)
-        s.message = "Cheese " + slotNames[active] + " is on - switch A / B / C to compare";
+        s.message = "Reference " + slotNames[active] + " matched - switch A / B / C to compare";
     return s;
 }
 
@@ -682,7 +683,7 @@ void MacAndCheeseProcessor::timerCallback()
         applyActiveSlot();
 
     const auto ps = prepSettings();
-    juce::String key = juce::String (ps.amount, 2) + ":" + juce::String ((int) ps.monoHz) + ":" + juce::String (prepRefFor (active)) + ":" + juce::String ((int) ps.fluff);
+    juce::String key = juce::String (ps.amount, 2) + ":" + juce::String ((int) ps.monoHz) + ":" + juce::String (active) + ":" + juce::String ((int) ps.fluff);
     for (auto b : ps.bands) key << ":" << juce::String (b, 2);
     key << ":" << juce::String (pMaxCorr->load(), 1); // Max seasoning changes the EQ, so the loudness match too
     const double now = juce::Time::getMillisecondCounterHiRes();

@@ -77,6 +77,7 @@ public:
     std::atomic<float> clipDbNow { 0.0f }, maxClipDb { 0.0f }; // dB shaved by the clipper
     std::atomic<float> suggestionDb { 0.0f }; // limiter off: gain still needed to match loudness
     std::atomic<float> gainIntoLimiterDb { 0.0f }; // clean gain between clipper and limiter
+    std::atomic<float> effClipDb { 0.0f }, effCeilingDb { -1.0f }; // values in use (auto or manual)
 
     // Learn quality: how much the learned spectrum still changes between checks (-1 = not measured yet)
     std::atomic<float> learnDeviationDb { -1.0f };
@@ -116,7 +117,6 @@ private:
     mm::BandStats trackBands;                 // PREP statistics of the learned track (guarded by dataLock)
     mm::Prep prep;                            // audio thread
     mm::PrepSettings prepSettings() const;
-    int prepRefFor (int slot) const;          // "Prep with": Same -> slot itself
     void applyPrepStats();                    // message thread
     juce::String lastPrepKey;
     double prepChangedAt = 0.0;
@@ -182,7 +182,10 @@ private:
     std::atomic<float>* pMatch = nullptr;
     std::atomic<float>* pMidEq = nullptr;
     std::atomic<float>* pSideEq = nullptr;
-    std::atomic<float>* pLoudness = nullptr;
+    std::atomic<float>* pGain = nullptr;
+    std::atomic<float>* pGainAuto = nullptr;
+    std::atomic<float>* pClipAuto = nullptr;
+    std::atomic<float>* pCeilingAuto = nullptr;
     std::atomic<float>* pSmoothing = nullptr;
     std::atomic<float>* pMaxCorr = nullptr;
     std::atomic<float>* pEqMode = nullptr;
@@ -193,7 +196,6 @@ private:
     std::atomic<float>* pLevelMatch = nullptr;
     std::atomic<float>* pUnclump = nullptr;
     std::atomic<float>* pMonoBase = nullptr;
-    std::atomic<float>* pPrepWith = nullptr;
     std::atomic<float>* pFluff = nullptr;
     std::array<std::atomic<float>*, mm::prepBands> pBand {};
     std::atomic<float>* pProfile = nullptr;

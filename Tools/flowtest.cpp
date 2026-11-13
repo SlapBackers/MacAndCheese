@@ -425,8 +425,18 @@ int main (int argc, char* argv[])
         pump (300);
     }
 
+    // Auto clip (default): the clipper takes all but the last ~1 dB of limiting
+    proc->maxGrDb = 0.0f; proc->maxClipDb = 0.0f;
+    measure ("auto clip");
+    std::cout << "  info  auto clip: clipper max " << proc->maxClipDb.load() << " dB, limiter max " << proc->maxGrDb.load() << " dB\n";
+    check (proc->maxGrDb.load() < 1.6f, "Auto clip: the limiter only does the last ~1 dB");
+    proc->apvts.getParameter ("clipAuto")->setValueNotifyingHost (0.0f); // manual clip from here
+    pump (200);
+    check (proc->apvts.getRawParameterValue ("clip")->load() > 2.0f, "Auto off: Clip stays where Auto had it (no jump)");
+
     // clipper before the limiter
     auto setClip = [&] (float db) { auto* p = proc->apvts.getParameter ("clip"); p->setValueNotifyingHost (p->convertTo0to1 (db)); pump (300); };
+    setClip (0.0f);
     proc->maxGrDb = 0.0f; proc->maxClipDb = 0.0f;
     measure ("clip 0 dB");
     const float grNoClip = proc->maxGrDb.load();
@@ -483,7 +493,7 @@ int main (int argc, char* argv[])
     pump (300);
     snapshot (*editor, outDir.getChildFile ("3-matched.png"));
     for (auto* c : editor->getChildren())
-        if (auto* btn = dynamic_cast<juce::TextButton*> (c); btn != nullptr && btn->getButtonText() == "Recipe")
+        if (auto* btn = dynamic_cast<juce::TextButton*> (c); btn != nullptr && btn->getButtonText() == "Details")
             btn->triggerClick();
     pump (300);
     snapshot (*editor, outDir.getChildFile ("4-advanced.png"));
