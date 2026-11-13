@@ -290,6 +290,7 @@ mm::Config MacAndCheeseProcessor::configFor (double frac) const
 {
     auto c = config;
     c.lowessFrac = frac;
+    c.maxBoostDb = pMaxCorr->load();
     return c;
 }
 
@@ -683,6 +684,7 @@ void MacAndCheeseProcessor::timerCallback()
     const auto ps = prepSettings();
     juce::String key = juce::String (ps.amount, 2) + ":" + juce::String ((int) ps.monoHz) + ":" + juce::String (prepRefFor (active)) + ":" + juce::String ((int) ps.fluff);
     for (auto b : ps.bands) key << ":" << juce::String (b, 2);
+    key << ":" << juce::String (pMaxCorr->load(), 1); // Max seasoning changes the EQ, so the loudness match too
     const double now = juce::Time::getMillisecondCounterHiRes();
     if (key != lastPrepKey)
     {
@@ -795,7 +797,8 @@ void MacAndCheeseProcessor::applyActiveSlot()
 
 void MacAndCheeseProcessor::builderTick()
 {
-    // EQ smoothing knob -> re-smooth the stored matching curves in the background
+    // Blend (EQ smoothing) changes the EQ, so the loudness match must follow: re-run the full match when the
+    // learned track is there; after reopening a project (no track) only the curves can be re-smoothed.
     const double frac = currentFrac();
     if (std::abs (frac - requestedFrac) > 1e-5 && ! resmoothPending.load())
     {
@@ -804,7 +807,12 @@ void MacAndCheeseProcessor::builderTick()
             requestedFrac = frac;
         }
         resmoothPending = true;
-        pool.addJob ([this, frac] { resmooth (frac); resmoothPending = false; });
+        pool.addJob ([this, frac]
+        {
+            if (hasLearnedTrack()) matchSlots ({ 0, 1, 2 });
+            else resmooth (frac);
+            resmoothPending = false;
+        });
     }
 
     const juce::ScopedLock sl (builderLock);

@@ -422,7 +422,8 @@ int main (int argc, char* argv[])
     {
         auto setP = [&] (const char* id, float v) { auto* p = proc->apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
         proc->apvts.getParameter ("limiter")->setValueNotifyingHost (1.0f);
-        const auto before = measure ("PREP off (baseline, same settings)");
+        const auto before = measure ("PREP off, Blend 60 % (baseline)");
+        check (std::abs (before.first - refLoud (refBright)) < 1.0, "Blend 60 %: loudness still matches the reference");
         setP ("unclump", 100.0f);
         setP ("monoBase", 120.0f);
         const double t0 = juce::Time::getMillisecondCounterHiRes();

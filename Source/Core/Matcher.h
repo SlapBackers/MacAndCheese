@@ -25,6 +25,7 @@ struct Config
     int    rmsCorrectionSteps = 4;
     double lowessFrac        = 0.0375;
     double lowessDelta       = 0.001;
+    float  maxBoostDb        = 0.0f;  // EQ cap used when matching loudness (0 = uncapped, as Matchering)
 
     int numBins() const noexcept { return fftSize / 2 + 1; }
 };

@@ -51,7 +51,7 @@ public:
         holdLp.design (s.holdFilterHz, sampleRate);
         releaseLp.design (s.releaseFilterCoef / s.releaseMs, sampleRate);
 
-        ghc.init (std::max (latency + 1, window));
+        ghc.init (std::max (latency + tpReach + 1, window));
         sRing.init (std::max (2 * kHalf + 1, kHalf + hold));
         audio.resize ((size_t) numChannels);
         for (auto& a : audio)
@@ -112,7 +112,12 @@ public:
             const float relOut = releaseLp.process (std::max (held, holdOut));
             const float release = std::max (holdOut, relOut);
 
-            const float g = enabled ? 1.0f - std::max ({ ghc.ago (latency), att, release }) : 1.0f;
+            // true peak: the waveform between samples depends on the gain of the neighbours too, so take the
+            // largest reduction needed within the true-peak filter's reach around the output sample
+            float need = 0.0f;
+            for (int k = latency - tpReach; k <= latency + tpReach; ++k)
+                need = std::max (need, ghc.ago (k));
+            const float g = enabled ? 1.0f - std::max ({ need, att, release }) : 1.0f;
             minGain = std::min (minGain, g);
             for (int c = 0; c < numCh; ++c)
                 ch[c][i] = audio[(size_t) c].ago (totalLatency) * g;
@@ -179,6 +184,7 @@ private:
 
     Settings settings;
     int window = 1, half = 0, hold = 1, kHalf = 0, latency = 0, totalLatency = 0;
+    static constexpr int tpReach = 6; // = TruePeakDetector delay (half its interpolation filter)
     bool truePeak = true;
     std::vector<TruePeakDetector> detectors;
     std::vector<float> kernel;
