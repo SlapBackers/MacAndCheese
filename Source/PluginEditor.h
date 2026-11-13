@@ -8,9 +8,10 @@ namespace ui
 {
     namespace colours
     {
-        const juce::Colour bg { 0xff0f1115 }, panel { 0xff171a20 }, line { 0xff272b34 },
-                           text { 0xffe8eaef }, dim { 0xff8a90a0 }, accent { 0xfff5a524 },
-                           accent2 { 0xff36c9b4 }, error { 0xffe5534b }, rec { 0xffe5484d };
+        // baked crust, cream sauce, melted cheddar
+        const juce::Colour bg { 0xff1b150f }, panel { 0xff2a2017 }, line { 0xff3e3022 },
+                           text { 0xfffff3d6 }, dim { 0xffb8a483 }, accent { 0xffffc21a },
+                           accent2 { 0xffff8a1f }, error { 0xffe5534b }, rec { 0xffe5484d };
     }
 
     class LookAndFeel : public juce::LookAndFeel_V4

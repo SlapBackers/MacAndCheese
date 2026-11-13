@@ -10,6 +10,8 @@ LookAndFeel::LookAndFeel()
     setColour (juce::TextButton::textColourOffId, colours::text);
     setColour (juce::TextButton::textColourOnId, colours::bg);
     setColour (juce::Slider::textBoxTextColourId, colours::text);
+    setColour (juce::Slider::thumbColourId, colours::accent);
+    setColour (juce::Slider::backgroundColourId, colours::line);
     setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxHighlightColourId, colours::accent.withAlpha (0.4f));
@@ -40,8 +42,8 @@ void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int 
     g.strokePath (value, juce::PathStrokeType (thick, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     const float body = radius - thick * (big ? 2.2f : 1.6f);
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2a2f39), c.x, c.y - body,
-                                             juce::Colour (0xff15181d), c.x, c.y + body, false));
+    g.setGradientFill (juce::ColourGradient (colours::line, c.x, c.y - body,
+                                             colours::bg, c.x, c.y + body, false));
     g.fillEllipse (c.x - body, c.y - body, body * 2, body * 2);
     g.setColour (colours::line.brighter (0.2f));
     g.drawEllipse (c.x - body, c.y - body, body * 2, body * 2, 1.0f);

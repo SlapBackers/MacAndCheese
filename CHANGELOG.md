@@ -2,6 +2,11 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MacAndCheese/releases).
 
+## v2.1.3 — Learn knows when it's enough, cheesier look
+
+- **Learn quality fixed**: it used to never say "enough" on real songs, because the analysis re-sliced the whole capture at every check. It now works on fixed 15 s slices and says "enough" when the loudest part hasn't been beaten for 30 s, or when the spectrum (60 Hz–12 kHz) changes less than 0.5 dB on average.
+- Mac and Cheese colours: baked crust, cream, melted cheddar.
+
 ## v2.1.2 — MatchMaster is now Mac and Cheese
 
 - **New name: Mac and Cheese.** *Your mac, their cheese*: your track is the mac, the reference is the cheese. The plugin's internal ID is unchanged, so DAWs treat it as the same plugin; saved projects keep their settings.

@@ -1,7 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "Core/TruePeak.h"
-#include <numeric>
 
 namespace
 {
@@ -340,10 +339,10 @@ void MacAndCheeseProcessor::startLearning()
     learnState = LearnState::listening;
     learnDeviationDb = -1.0f;
     learnEnough = false;
-    lastLearnCheck = 0.0;
     if (! learnCheckPending.load())
     {
-        lastLearnBands.clear();
+        learnSlices.clear();
+        learnShape.clear();
         learnStableChecks = 0;
     }
     setMessage ({}, false);
@@ -389,62 +388,73 @@ void MacAndCheeseProcessor::stopLearning()
     });
 }
 
-// Learn quality: re-run the track analysis on what has been captured so far and see whether the
-// spectrum of the loudest parts (what the match is built from) has stopped changing.
+// Learn quality, on fixed 15 s slices of the capture (boundaries never move as it grows):
+// "enough" once the loudest slice hasn't been beaten for 30 s, or the averaged spectrum of the
+// loudest slices changes < 0.5 dB on average (60 Hz - 12 kHz) for two slices in a row.
 void MacAndCheeseProcessor::checkLearnQuality()
 {
-    constexpr double checkEvery = 4.0, minSeconds = 30.0;
-    constexpr float stableDb = 0.5f;
-    const double secs = getCaptureSeconds();
-    if (secs < 8.0 || secs - lastLearnCheck < checkEvery || learnCheckPending.load())
+    const int sliceLen = (int) (15.0 * captureRate);
+    const int done = capturePos.load() / sliceLen;
+    if (done <= (int) learnSlices.size() || learnCheckPending.load())
         return;
-    lastLearnCheck = secs;
-    const int n = capturePos.load();
     learnCheckPending = true;
-
-    pool.addJob ([this, n, secs, rate = captureRate]
+    pool.addJob ([this, done, sliceLen, rate = captureRate]
     {
-        try
+        constexpr int order = 12, n = 1 << order;
+        juce::dsp::FFT fft (order);
+        std::vector<float> buf (2 * n), win (n);
+        for (int i = 0; i < n; ++i) win[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * i / n);
+        std::vector<double> edges;
+        for (int k = -12; k <= 11; ++k) edges.push_back (1000.0 * std::pow (2.0, k / 3.0)); // ~63 Hz - 12.7 kHz, 1/3 oct
+
+        for (int sl = (int) learnSlices.size(); sl < done; ++sl) // the audio thread only writes beyond capturePos
         {
-            // the audio thread only writes beyond capturePos, so [0, n) is stable while listening
-            juce::AudioBuffer<float> view (capture.getArrayOfWritePointers(), 2, n);
-            const auto t = mm::analyzeTarget (mm::toStereoAtRate (view, rate, config.sampleRate), config);
-
-            // 1/3-octave bands, 31.5 Hz - 16 kHz, shape only (mean removed)
-            std::vector<float> bands;
-            const double binHz = config.sampleRate / config.fftSize;
-            for (int k = -15; k <= 12; ++k)
+            Slice s;
+            s.bands.assign (edges.size(), 0.0);
+            const float* l = capture.getReadPointer (0, sl * sliceLen);
+            const float* r = capture.getReadPointer (1, sl * sliceLen);
+            double acc = 0;
+            for (int i = 0; i < sliceLen; ++i) { const double m = 0.5 * (l[i] + r[i]); acc += m * m; }
+            s.rmsDb = 10.0 * std::log10 (acc / sliceLen + 1e-20);
+            for (int f = 0; f + n <= sliceLen; f += n)
             {
-                const double fc = 1000.0 * std::pow (2.0, k / 3.0);
-                const int lo = juce::jmax (1, (int) (fc / std::pow (2.0, 1.0 / 6.0) / binHz));
-                const int hi = juce::jmin ((int) t.midSpectrum.size() - 1, juce::jmax (lo, (int) (fc * std::pow (2.0, 1.0 / 6.0) / binHz)));
-                double p = 0;
-                for (int b = lo; b <= hi; ++b)
-                    p += t.midSpectrum[(size_t) b] * t.midSpectrum[(size_t) b];
-                bands.push_back ((float) (10.0 * std::log10 (p / (hi - lo + 1) + 1e-20)));
+                for (int i = 0; i < n; ++i) buf[(size_t) i] = 0.5f * (l[f + i] + r[f + i]) * win[(size_t) i];
+                std::fill (buf.begin() + n, buf.end(), 0.0f);
+                fft.performFrequencyOnlyForwardTransform (buf.data());
+                for (size_t b = 0; b < edges.size(); ++b)
+                    for (int k = (int) (edges[b] / std::cbrt (2.0) * n / rate); k < (int) (edges[b] * n / rate) + 1; ++k)
+                        s.bands[b] += buf[(size_t) k] * buf[(size_t) k];
             }
-            const float mean = std::accumulate (bands.begin(), bands.end(), 0.0f) / (float) bands.size();
-            for (auto& b : bands)
-                b -= mean;
-            const float loudDb = (float) juce::Decibels::gainToDecibels (t.matchRms, -100.0);
-
-            float dev = -1.0f;
-            if (lastLearnBands.size() == bands.size())
-            {
-                dev = std::abs (loudDb - lastLearnLoudDb);
-                for (size_t i = 0; i < bands.size(); ++i)
-                    dev = juce::jmax (dev, std::abs (bands[i] - lastLearnBands[i]));
-            }
-            lastLearnBands = bands;
-            lastLearnLoudDb = loudDb;
-            learnStableChecks = dev >= 0.0f && dev < stableDb ? learnStableChecks + 1 : 0;
-            if (learnState == LearnState::listening)
-            {
-                learnDeviationDb = dev;
-                learnEnough = learnStableChecks >= 2 && secs >= minSeconds;
-            }
+            learnSlices.push_back (std::move (s));
         }
-        catch (const std::exception&) {}
+
+        // loudest slices (within 3 dB of the loudest), averaged spectrum shape in dB
+        double top = -1e9;
+        int loudest = 0;
+        for (int i = 0; i < (int) learnSlices.size(); ++i)
+            if (learnSlices[(size_t) i].rmsDb > top) { top = learnSlices[(size_t) i].rmsDb; loudest = i; }
+        std::vector<double> shape (edges.size(), 0.0);
+        for (const auto& s : learnSlices)
+            if (s.rmsDb > top - 3.0)
+                for (size_t b = 0; b < shape.size(); ++b) shape[b] += s.bands[b];
+        double mean = 0;
+        for (auto& v : shape) { v = 10.0 * std::log10 (v + 1e-20); mean += v / (double) shape.size(); }
+        float dev = -1.0f;
+        if (learnShape.size() == shape.size())
+        {
+            double d = 0;
+            for (size_t b = 0; b < shape.size(); ++b) d += std::abs ((shape[b] - mean) - learnShape[b]) / (double) shape.size();
+            dev = (float) d;
+        }
+        for (auto& v : shape) v -= mean;
+        learnShape = shape;
+        learnStableChecks = dev >= 0.0f && dev < 0.5f ? learnStableChecks + 1 : 0;
+        const bool loudestHeard = (int) learnSlices.size() - 1 - loudest >= 2; // loudest not beaten for 30 s
+        if (learnState == LearnState::listening)
+        {
+            learnDeviationDb = dev;
+            learnEnough = learnSlices.size() >= 2 && (learnStableChecks >= 2 || loudestHeard);
+        }
         learnCheckPending = false;
     });
 }

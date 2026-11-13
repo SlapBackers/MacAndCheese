@@ -125,9 +125,9 @@ private:
     double captureRate = 44100.0;
     void checkLearnQuality();               // message thread, while listening
     std::atomic<bool> learnCheckPending { false };
-    double lastLearnCheck = 0.0;            // seconds of capture at the last check
-    std::vector<float> lastLearnBands;      // worker thread
-    float lastLearnLoudDb = 0.0f;           // worker thread
+    struct Slice { double rmsDb = 0; std::vector<double> bands; };
+    std::vector<Slice> learnSlices;         // worker thread: fixed 15 s slices of the capture
+    std::vector<double> learnShape;         // worker thread: last averaged spectrum shape (dB, mean removed)
     int learnStableChecks = 0;              // worker thread
 
     // real-time engine (active slot)
