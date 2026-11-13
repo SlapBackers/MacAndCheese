@@ -8,6 +8,8 @@ namespace
     constexpr double minCaptureSeconds = 5.0;
     constexpr double maxReferenceSeconds = 15.0 * 60.0; // Matchering's max_length
     const juce::StringArray slotNames { "A", "B", "C" };
+    const char* const bandIds[mm::prepBands] = { "bandBottom", "bandMud", "bandBody", "bandBite", "bandFizz" };
+    const char* const bandNames[mm::prepBands] = { "Bottom", "Mud", "Body", "Bite", "Fizz" };
     constexpr float clipOffDb = 24.0f;    // clip point far above any signal: clipper is a pure delay
     constexpr float clipSoftStart = 0.9549925859f; // ClipOnly2 starts softening here (-0.2 dB)
 }
@@ -31,6 +33,12 @@ MacAndCheeseProcessor::MacAndCheeseProcessor()
     pCeiling = apvts.getRawParameterValue ("ceiling");
     pClip = apvts.getRawParameterValue ("clip");
     pLevelMatch = apvts.getRawParameterValue ("levelMatch");
+    pUnclump = apvts.getRawParameterValue ("unclump");
+    pMonoBase = apvts.getRawParameterValue ("monoBase");
+    pPrepWith = apvts.getRawParameterValue ("prepWith");
+    pFluff = apvts.getRawParameterValue ("fluff");
+    for (int b = 0; b < mm::prepBands; ++b)
+        pBand[(size_t) b] = apvts.getRawParameterValue (bandIds[b]);
     pProfile = apvts.getRawParameterValue ("profile");
     for (auto& b : slotBusy)
         b = false;
@@ -57,20 +65,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout MacAndCheeseProcessor::creat
     const juce::NormalisableRange<float> percent (0.0f, 100.0f, 0.1f);
 
     juce::AudioProcessorValueTreeState::ParameterLayout l;
-    l.add (std::make_unique<F> (juce::ParameterID { "match", 1 }, "Match", percent, 100.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "match", 1 }, "Cheesiness", percent, 100.0f, pct));
+    // PREP (fix the mix)
+    l.add (std::make_unique<F> (juce::ParameterID { "unclump", 1 }, "Unclump", percent, 0.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "monoBase", 1 }, "Mono Base", juce::NormalisableRange<float> (0.0f, 300.0f, 1.0f), 0.0f,
+                                juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 20.0f ? juce::String ("Off") : juce::String (juce::roundToInt (v)) + " Hz"; })));
+    l.add (std::make_unique<Ch> (juce::ParameterID { "prepWith", 1 }, "Prep With", juce::StringArray { "Same", "A", "B", "C" }, 0));
+    for (int b = 0; b < mm::prepBands; ++b)
+        l.add (std::make_unique<F> (juce::ParameterID { bandIds[b], 1 }, bandNames[b], percent, 100.0f, pct));
+    l.add (std::make_unique<B> (juce::ParameterID { "fluff", 1 }, "Fluff", false));
     l.add (std::make_unique<Ch> (juce::ParameterID { "profile", 1 }, "Profile", slotNames, 0));
     // EQ
     l.add (std::make_unique<F> (juce::ParameterID { "midEq", 1 }, "Mid EQ", percent, 100.0f, pct));
     l.add (std::make_unique<F> (juce::ParameterID { "sideEq", 1 }, "Side EQ", percent, 100.0f, pct));
-    l.add (std::make_unique<F> (juce::ParameterID { "smoothing", 1 }, "EQ Smoothing", percent, 0.0f, pct));
-    l.add (std::make_unique<F> (juce::ParameterID { "maxCorr", 1 }, "Max Correction", juce::NormalisableRange<float> (3.0f, 24.0f, 0.1f), 12.0f, db));
+    l.add (std::make_unique<F> (juce::ParameterID { "smoothing", 1 }, "Blend", percent, 0.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "maxCorr", 1 }, "Max Seasoning", juce::NormalisableRange<float> (3.0f, 24.0f, 0.1f), 12.0f, db));
     l.add (std::make_unique<Ch> (juce::ParameterID { "eqMode", 1 }, "EQ Mode", juce::StringArray { "Linear", "Natural" }, 0));
     // loudness + limiter
-    l.add (std::make_unique<F> (juce::ParameterID { "loudness", 1 }, "Loudness", percent, 100.0f, pct));
-    l.add (std::make_unique<F> (juce::ParameterID { "clip", 1 }, "Clip", juce::NormalisableRange<float> (0.0f, 6.0f, 0.1f), 0.0f, db));
-    l.add (std::make_unique<B> (juce::ParameterID { "limiter", 1 }, "Limiter", true));
+    l.add (std::make_unique<F> (juce::ParameterID { "loudness", 1 }, "Portion", percent, 100.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "clip", 1 }, "Crisp", juce::NormalisableRange<float> (0.0f, 6.0f, 0.1f), 0.0f, db));
+    l.add (std::make_unique<B> (juce::ParameterID { "limiter", 1 }, "Lid", true));
     // monitoring switch: hear the EQ match only, at the original track's loudness (not automatable)
-    l.add (std::make_unique<B> (juce::ParameterID { "levelMatch", 1 }, "Level Match", false,
+    l.add (std::make_unique<B> (juce::ParameterID { "levelMatch", 1 }, "Blind Taste", false,
                                 juce::AudioParameterBoolAttributes().withAutomatable (false)));
     l.add (std::make_unique<B> (juce::ParameterID { "truePeak", 1 }, "True Peak", true));
     l.add (std::make_unique<F> (juce::ParameterID { "ceiling", 1 }, "Ceiling", juce::NormalisableRange<float> (-6.0f, 0.0f, 0.1f), -1.0f, db));
@@ -96,6 +112,8 @@ void MacAndCheeseProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
 
     limiter.prepare (sampleRate, 2);
     clipper.prepare (sampleRate);
+    prep.prepare (sampleRate, maxBlock);
+    applyPrepStats();
     clipThresholdDb.reset (sampleRate, 0.05);
     clipThresholdDb.setCurrentAndTargetValue (clipOffDb);
     clipGainCache = -1.0f;
@@ -197,6 +215,7 @@ void MacAndCheeseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     finalGain.setTargetValue (juce::Decibels::decibelsToGain (postDb));
     clipThresholdDb.setTargetValue (clipPointDb);
 
+    const auto prepSet = prepSettings();
     float peakL = 0.0f, peakR = 0.0f;
     for (int off = 0; off < total; off += maxBlock)
     {
@@ -213,6 +232,7 @@ void MacAndCheeseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
             s[i] = m[i] - ri;
         }
 
+        prep.process (m, s, n, prepSet); // PREP: fix the mix before the match EQ
         midConv.process (m, n);
         sideConv.process (s, n);
 
@@ -252,6 +272,9 @@ void MacAndCheeseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
     meterL.store (juce::jmax (peakL, meterL.load() * 0.92f));
     meterR.store (juce::jmax (numCh > 1 ? peakR : peakL, meterR.load() * 0.92f));
+    const auto red = prep.popReduction();
+    for (int b = 0; b < mm::prepBands; ++b)
+        bandReduction[(size_t) b].store (juce::jmax (red[(size_t) b], bandReduction[(size_t) b].load() * 0.92f));
     const float shaved = clipOver > clipSoftStart ? juce::Decibels::gainToDecibels (clipOver / clipSoftStart) : 0.0f;
     clipOver = 0.0f;
     clipDbNow.store (juce::jmax (shaved, clipDbNow.load() * 0.92f));
@@ -295,14 +318,22 @@ void MacAndCheeseProcessor::loadReference (int slot, const juce::File& file)
             juce::AudioBuffer<float> raw ((int) juce::jmax (1u, reader->numChannels), len);
             reader->read (&raw, 0, len, 0, true, true);
 
-            auto ref = std::make_shared<mm::ReferenceProfile> (
-                mm::analyzeReference (mm::toStereoAtRate (raw, reader->sampleRate, config.sampleRate), config));
+            const auto st = mm::toStereoAtRate (raw, reader->sampleRate, config.sampleRate);
+            auto ref = std::make_shared<mm::ReferenceProfile> (mm::analyzeReference (st, config));
+            std::vector<float> mid ((size_t) st.getNumSamples()), side (mid.size());
+            for (int i = 0; i < st.getNumSamples(); ++i)
+            {
+                mid[(size_t) i] = 0.5f * (st.getSample (0, i) + st.getSample (1, i));
+                side[(size_t) i] = 0.5f * (st.getSample (0, i) - st.getSample (1, i));
+            }
+            const auto bands = mm::Prep::analyse (mid, side, config.sampleRate);
             {
                 const juce::ScopedLock sl (dataLock);
                 auto& s = slots[(size_t) slot];
                 s.ref = ref;
                 s.result = nullptr;
                 s.name = file.getFileNameWithoutExtension();
+                s.bands = bands;
             }
             resultsChanged = true;
             matchSlots ({ slot });
@@ -374,15 +405,17 @@ void MacAndCheeseProcessor::stopLearning()
         {
             auto t = std::make_shared<mm::TargetProfile> (
                 mm::analyzeTarget (mm::toStereoAtRate (buf, rate, config.sampleRate), config));
+            const auto tb = mm::Prep::analyse (t->mid, t->side, config.sampleRate);
             {
                 const juce::ScopedLock sl (dataLock);
                 track = t;
+                trackBands = tb;
             }
             matchSlots ({ 0, 1, 2 });
         }
         catch (const std::exception& e)
         {
-            setMessage (juce::String ("Learn: ") + e.what(), true);
+            setMessage (juce::String ("Taste: ") + e.what(), true);
         }
         learnState = LearnState::idle;
     });
@@ -462,27 +495,49 @@ void MacAndCheeseProcessor::checkLearnQuality()
 void MacAndCheeseProcessor::matchSlots (std::vector<int> which)
 {
     std::shared_ptr<mm::TargetProfile> t;
+    mm::BandStats tb;
     double frac;
     {
         const juce::ScopedLock sl (dataLock);
         t = track;
+        tb = trackBands;
         frac = requestedFrac;
     }
     if (t == nullptr)
         return;
+    const auto set = prepSettings();
 
     for (int i : which)
     {
         std::shared_ptr<mm::ReferenceProfile> ref;
+        mm::BandStats rb;
         {
             const juce::ScopedLock sl (dataLock);
             ref = slots[(size_t) i].ref;
+            rb = slots[(size_t) prepRefFor (i)].bands;
         }
         if (ref == nullptr)
             continue;
         try
         {
-            auto res = std::make_shared<mm::MatchResult> (mm::match (*t, *ref, configFor (frac)));
+            // the master is matched on the *prepped* track: run PREP offline on the learned audio first
+            auto tgt = t;
+            if (set.active() && tb.valid)
+            {
+                mm::Prep p;
+                p.prepare (config.sampleRate, 512);
+                p.setStats (tb, rb);
+                auto m = t->mid, s = t->side;
+                p.process (m.data(), s.data(), (int) m.size(), set);
+                juce::AudioBuffer<float> lr (2, (int) m.size());
+                for (size_t k = 0; k < m.size(); ++k)
+                {
+                    lr.setSample (0, (int) k, m[k] + s[k]);
+                    lr.setSample (1, (int) k, m[k] - s[k]);
+                }
+                tgt = std::make_shared<mm::TargetProfile> (mm::analyzeTarget (lr, config));
+            }
+            auto res = std::make_shared<mm::MatchResult> (mm::match (*tgt, *ref, configFor (frac)));
             const juce::ScopedLock sl (dataLock);
             if (slots[(size_t) i].ref == ref)
                 slots[(size_t) i].result = res;
@@ -493,6 +548,29 @@ void MacAndCheeseProcessor::matchSlots (std::vector<int> which)
         }
     }
     resultsChanged = true;
+}
+
+mm::PrepSettings MacAndCheeseProcessor::prepSettings() const
+{
+    mm::PrepSettings s;
+    s.amount = pUnclump->load() * 0.01f;
+    s.monoHz = pMonoBase->load();
+    s.fluff = pFluff->load() > 0.5f;
+    for (int b = 0; b < mm::prepBands; ++b)
+        s.bands[(size_t) b] = pBand[(size_t) b]->load() * 0.01f;
+    return s;
+}
+
+int MacAndCheeseProcessor::prepRefFor (int slot) const
+{
+    const int with = juce::roundToInt (pPrepWith->load());
+    return with == 0 ? slot : with - 1;
+}
+
+void MacAndCheeseProcessor::applyPrepStats()
+{
+    const juce::ScopedLock sl (dataLock);
+    prep.setStats (trackBands, slots[(size_t) prepRefFor (getActiveSlot())].bands); // tables only; a torn read lasts one control tick
 }
 
 void MacAndCheeseProcessor::resmooth (double frac)
@@ -575,17 +653,17 @@ MacAndCheeseProcessor::Snapshot MacAndCheeseProcessor::getSnapshot() const
             s.message = "Keep playing - the sound is still changing (" + juce::String (dev, 1) + " dB). Include the loudest part";
     }
     else if (learnState == LearnState::analysing)
-        s.message = "Matching your track to the references...";
+        s.message = "Making the sauce...";
     else if (! anyRef && track == nullptr)
-        s.message = "Drop up to 3 mastered songs into A, B, C - then press Learn and play your track";
+        s.message = "Drop up to 3 great-sounding songs (the cheese) into A, B, C - then taste your mac (play your track)";
     else if (track == nullptr && restoredFromProject && s.slots[(size_t) active].matched)
-        s.message = "Restored from the project - press Learn again before loading a new reference";
+        s.message = "Restored from the project - taste again before loading a new cheese";
     else if (track == nullptr)
-        s.message = "Press Learn and play your track";
+        s.message = "Press Taste and play your track";
     else if (! s.slots[(size_t) active].loaded)
-        s.message = "Drop a reference into slot " + slotNames[active];
+        s.message = "Drop a song into cheese " + slotNames[active];
     else if (s.slots[(size_t) active].matched)
-        s.message = "Profile " + slotNames[active] + " matched - switch A / B / C to compare";
+        s.message = "Cheese " + slotNames[active] + " is on - switch A / B / C to compare";
     return s;
 }
 
@@ -601,6 +679,22 @@ void MacAndCheeseProcessor::timerCallback()
     const int active = getActiveSlot();
     if (resultsChanged.exchange (false) || active != shownSlot)
         applyActiveSlot();
+
+    const auto ps = prepSettings();
+    juce::String key = juce::String (ps.amount, 2) + ":" + juce::String ((int) ps.monoHz) + ":" + juce::String (prepRefFor (active)) + ":" + juce::String ((int) ps.fluff);
+    for (auto b : ps.bands) key << ":" << juce::String (b, 2);
+    const double now = juce::Time::getMillisecondCounterHiRes();
+    if (key != lastPrepKey)
+    {
+        lastPrepKey = key;
+        prepChangedAt = now;
+        applyPrepStats();
+    }
+    else if (prepChangedAt > 0.0 && now - prepChangedAt > 500.0 && hasLearnedTrack())
+    {
+        prepChangedAt = 0.0; // settled: re-match the master on the newly prepped track
+        pool.addJob ([this] { matchSlots ({ 0, 1, 2 }); });
+    }
 
     const int mode = pEqMode->load() > 0.5f ? 1 : 0;
     if (mode != latencyMode)
@@ -695,6 +789,7 @@ void MacAndCheeseProcessor::applyActiveSlot()
         activeEqPeakDb = (float) src->eqPeakDb;
     }
     activeMatched = src != nullptr;
+    applyPrepStats();
     forceRebuild = true;
 }
 
@@ -787,6 +882,20 @@ namespace
         }
         return out;
     }
+    juce::MemoryBlock bandsBlob (const mm::BandStats& b)
+    {
+        return b.valid ? juce::MemoryBlock (&b.q, sizeof (b.q)) : juce::MemoryBlock();
+    }
+    mm::BandStats bandsFrom (const juce::var& v)
+    {
+        mm::BandStats b;
+        if (auto* mb = v.getBinaryData(); mb != nullptr && mb->getSize() == sizeof (b.q))
+        {
+            std::memcpy (&b.q, mb->getData(), sizeof (b.q));
+            b.valid = true;
+        }
+        return b;
+    }
     const juce::Identifier idState ("MatchMasterState"), idSlot ("Slot"), idRef ("Reference"), idResult ("Result");
     constexpr int stateVersion = 1;
 }
@@ -798,12 +907,14 @@ void MacAndCheeseProcessor::getStateInformation (juce::MemoryBlock& dest)
     root.appendChild (apvts.copyState(), nullptr);
     {
         const juce::ScopedLock sl (dataLock);
+        root.setProperty ("trackBands", bandsBlob (trackBands), nullptr);
         for (int i = 0; i < numSlots; ++i)
         {
             const auto& slot = slots[(size_t) i];
             juce::ValueTree st (idSlot);
             st.setProperty ("index", i, nullptr);
             st.setProperty ("name", slot.name, nullptr);
+            st.setProperty ("bands", bandsBlob (slot.bands), nullptr);
             if (const auto& r = slot.ref)
             {
                 juce::ValueTree rt (idRef);
@@ -878,6 +989,7 @@ void MacAndCheeseProcessor::setStateInformation (const void* data, int size)
             continue;
         auto& slot = restored[(size_t) i];
         slot.name = st.getProperty ("name").toString();
+        slot.bands = bandsFrom (st["bands"]);
         const auto rt = st.getChildWithName (idRef);
         if (rt.isValid())
         {
@@ -913,6 +1025,7 @@ void MacAndCheeseProcessor::setStateInformation (const void* data, int size)
     {
         const juce::ScopedLock sl (dataLock);
         slots = restored;
+        trackBands = bandsFrom (root["trackBands"]);
         track = nullptr;       // the learned audio itself is not stored in the project
         restoredFromProject = true;
         requestedFrac = currentFrac(); // stored curves are already smoothed with the saved setting

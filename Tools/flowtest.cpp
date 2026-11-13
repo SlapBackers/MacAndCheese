@@ -114,6 +114,58 @@ void snapshot (juce::Component& c, const juce::File& f)
 }
 } // namespace
 
+// PREP / Unclump on a synthetic bad mix: a mud band (~250 Hz) that swells +8 dB for 1 s every 4 s,
+// against a reference whose mud is steady. Returns failures.
+int prepTest()
+{
+    int failures = 0;
+    auto check = [&] (bool ok, const juce::String& what) { std::cout << (ok ? "  PASS  " : "  FAIL  ") << what << "\n"; if (! ok) ++failures; };
+    const double sr = 44100;
+    const int n = (int) (sr * 30);
+    auto make = [&] (bool swell, unsigned seed)
+    {
+        std::mt19937 rng (seed);
+        std::normal_distribution<float> nd;
+        juce::dsp::IIR::Filter<float> bp (juce::dsp::IIR::Coefficients<float>::makeBandPass (sr, 250.0, 1.0));
+        std::vector<float> m ((size_t) n), sd ((size_t) n);
+        float lp = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            lp += 0.3f * (nd (rng) - lp);
+            const float mudGain = swell && std::fmod (i / sr, 4.0) < 1.0 ? 2.5f : 1.0f;
+            m[(size_t) i] = 0.05f * lp + 0.08f * mudGain * bp.processSample (nd (rng));
+            sd[(size_t) i] = 0.01f * nd (rng);
+        }
+        return std::pair<std::vector<float>, std::vector<float>> (m, sd);
+    };
+    auto ref = make (false, 7), bad = make (true, 8);
+    const auto rs = mm::Prep::analyse (ref.first, ref.second, sr);
+    const auto ts = mm::Prep::analyse (bad.first, bad.second, sr);
+    auto spread = [] (const mm::BandStats& st) { return st.q[0][1][3] - st.q[0][1][0]; }; // mid, Mud band: p95 - p50
+    auto run = [&] (std::pair<std::vector<float>, std::vector<float>> x, const mm::BandStats& t, float amount)
+    {
+        mm::Prep p;
+        p.prepare (sr, 512);
+        p.setStats (t, rs);
+        mm::PrepSettings set;
+        set.amount = amount;
+        p.process (x.first.data(), x.second.data(), n, set);
+        const auto red = p.popReduction();
+        return std::make_pair (mm::Prep::analyse (x.first, x.second, sr), red);
+    };
+    const auto fixed = run (bad, ts, 1.0f);
+    const auto same = run (ref, rs, 1.0f);
+    std::cout << "  info  Unclump, Mud band swell (p95-p50): reference " << juce::String (spread (rs), 1) << " dB, bad mix "
+              << juce::String (spread (ts), 1) << " dB -> " << juce::String (spread (fixed.first), 1) << " dB after Unclump (max cut "
+              << juce::String (fixed.second[1], 1) << " dB)\n";
+    check (spread (fixed.first) < spread (ts) - 1.5f, "Unclump evens out a swelling mud band");
+    float maxSame = 0;
+    for (auto r : same.second) maxSame = std::max (maxSame, r);
+    check (maxSame < 1.5f, "Unclump leaves a mix that already matches the reference (max cut " + juce::String (maxSame, 1) + " dB)");
+    check (fixed.second[3] < 1.5f && fixed.second[4] < 1.5f, "Unclump leaves healthy bands alone (Bite/Fizz)");
+    return failures;
+}
+
 int loadVst3 (const juce::String& path)
 {
     juce::VST3PluginFormat fmt;
@@ -142,7 +194,7 @@ int main (int argc, char* argv[])
         return loadVst3 (argv[2]);
     const juce::File outDir (argc > 1 ? argv[1] : juce::File::getCurrentWorkingDirectory().getFullPathName());
     outDir.createDirectory();
-    int failures = 0;
+    int failures = prepTest();
     auto check = [&] (bool ok, const juce::String& what) { std::cout << (ok ? "  PASS  " : "  FAIL  ") << what << "\n"; if (! ok) ++failures; };
 
     using LS = MacAndCheeseProcessor::LearnState;
@@ -361,10 +413,25 @@ int main (int argc, char* argv[])
     pump (300);
     snapshot (*editor, outDir.getChildFile ("3-matched.png"));
     for (auto* c : editor->getChildren())
-        if (auto* btn = dynamic_cast<juce::TextButton*> (c); btn != nullptr && btn->getButtonText() == "Advanced")
+        if (auto* btn = dynamic_cast<juce::TextButton*> (c); btn != nullptr && btn->getButtonText() == "Recipe")
             btn->triggerClick();
     pump (300);
     snapshot (*editor, outDir.getChildFile ("4-advanced.png"));
+
+    // PREP on: the master is re-matched on the prepped track, loudness and ceiling still hold
+    {
+        auto setP = [&] (const char* id, float v) { auto* p = proc->apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+        proc->apvts.getParameter ("limiter")->setValueNotifyingHost (1.0f);
+        const auto before = measure ("PREP off (baseline, same settings)");
+        setP ("unclump", 100.0f);
+        setP ("monoBase", 120.0f);
+        const double t0 = juce::Time::getMillisecondCounterHiRes();
+        const double g0 = proc->getSnapshot().gainDb;
+        pump (8000); // re-match runs in the background after a 0.5 s pause
+        std::cout << "  info  waited " << juce::roundToInt ((juce::Time::getMillisecondCounterHiRes() - t0) / 1000.0) << " s for the re-match; loudness gain " << g0 << " -> " << proc->getSnapshot().gainDb << " dB\n";
+        auto prepped = measure ("PREP on (Unclump 100 %, Mono base 120 Hz)");
+        check (std::abs (prepped.first - before.first) < 1.0 && prepped.second <= -0.9f, "PREP on: loudness kept (re-matched on the prepped track), ceiling holds");
+    }
 
     // save with the project -> reopen in a fresh instance: same sound without Learn
     {

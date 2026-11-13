@@ -11,6 +11,9 @@ LookAndFeel::LookAndFeel()
     setColour (juce::TextButton::textColourOnId, colours::bg);
     setColour (juce::Slider::textBoxTextColourId, colours::text);
     setColour (juce::Slider::thumbColourId, colours::accent);
+    setColour (juce::ComboBox::backgroundColourId, colours::panel);
+    setColour (juce::ComboBox::outlineColourId, colours::line);
+    setColour (juce::PopupMenu::backgroundColourId, colours::panel);
     setColour (juce::Slider::backgroundColourId, colours::line);
     setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
@@ -98,7 +101,7 @@ void DropZone::paint (juce::Graphics& g)
     auto inner = getLocalBounds().reduced (10, 8);
     g.setColour (selected ? colours::accent : colours::dim);
     g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
-    g.drawText (letter, inner.removeFromTop (22), juce::Justification::left);
+    g.drawText ("Cheese " + letter, inner.removeFromTop (22), juce::Justification::left);
 
     g.setColour (loaded ? colours::text : colours::dim);
     g.setFont (juce::FontOptions (12.0f, loaded ? juce::Font::bold : juce::Font::plain));
@@ -162,7 +165,7 @@ void LearnButton::paint (juce::Graphics& g)
     juce::String text = listening ? "Stop  " + juce::String ((int) seconds / 60) + ":" + juce::String ((int) seconds % 60).paddedLeft ('0', 2)
                                         + (enough ? "   -   enough" : deviation >= 0.0f ? "   -   keep playing" : "")
                       : state == LS::analysing ? juce::String ("Matching...")
-                      : learned ? juce::String ("Re-learn your track") : juce::String ("Learn your track");
+                      : learned ? juce::String ("Re-taste your mac") : juce::String ("Taste your mac");
     g.setColour (colours::text);
     g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
     g.drawText (text, inner, juce::Justification::centredLeft);
@@ -275,9 +278,28 @@ void Meter::paint (juce::Graphics& g)
 
     g.setColour (colours::dim);
     g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
-    const char* names[] = { "L", "R", "CLIP", "LIM" };
+    const char* names[] = { "L", "R", "CRISP", "LID" };
     for (int i = 0; i < 4; ++i)
         g.drawText (names[i], labels.withX ((int) (area.getX() + i * (w + 4)) - 4).withWidth ((int) w + 8), juce::Justification::centred);
+}
+
+void BandMeter::paint (juce::Graphics& g)
+{
+    static const char* names[] = { "Bottom", "Mud", "Body", "Bite", "Fizz" };
+    auto area = getLocalBounds().toFloat();
+    const float w = area.getWidth() / mm::prepBands;
+    for (int b = 0; b < mm::prepBands; ++b)
+    {
+        auto cell = juce::Rectangle<float> (area.getX() + b * w, area.getY(), w, area.getHeight()).reduced (4, 0);
+        auto label = cell.removeFromBottom (14);
+        g.setColour (colours::panel);
+        g.fillRoundedRectangle (cell, 3.0f);
+        g.setColour (colours::accent2);
+        g.fillRoundedRectangle (cell.withHeight (cell.getHeight() * juce::jlimit (0.0f, 1.0f, db[(size_t) b] / 9.0f)), 3.0f);
+        g.setColour (colours::dim);
+        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        g.drawText (names[b], label, juce::Justification::centred);
+    }
 }
 
 // ================================================================== Editor
@@ -320,12 +342,17 @@ MacAndCheeseEditor::MacAndCheeseEditor (MacAndCheeseProcessor& p) : AudioProcess
         l.setColour (juce::Label::textColourId, big ? colours::text : colours::dim);
         addAndMakeVisible (l);
     };
-    setupKnob (matchKnob, matchLabel, "MATCH", true);
-    setupKnob (midKnob, midLabel, "MID EQ", false);
-    setupKnob (sideKnob, sideLabel, "SIDE EQ", false);
-    setupKnob (loudKnob, loudLabel, "LOUDNESS", false);
-    setupKnob (smoothKnob, smoothLabel, "SMOOTHING", false);
-    setupKnob (corrKnob, corrLabel, "MAX CORR.", false);
+    setupKnob (matchKnob, matchLabel, "CHEESINESS", true);
+    setupKnob (midKnob, midLabel, "CENTRE", false);
+    setupKnob (sideKnob, sideLabel, "SIDES", false);
+    setupKnob (loudKnob, loudLabel, "PORTION", false);
+    setupKnob (smoothKnob, smoothLabel, "BLEND", false);
+    setupKnob (corrKnob, corrLabel, "MAX SEASONING", false);
+    setupKnob (unclumpKnob, unclumpLabel, "UNCLUMP", false);
+    setupKnob (monoKnob, monoLabel, "MONO BASE", false);
+    unclumpKnob.setTooltip ("Fix the mix: evens out build-ups (mud, harsh hits) compared with the reference");
+    monoKnob.setTooltip ("Mono low end below this frequency (left = off)");
+    loudKnob.setTooltip ("How much of the reference's loudness you take");
     sideKnob.getProperties().set ("side", true);
 
     auto& vts = proc.apvts;
@@ -335,6 +362,32 @@ MacAndCheeseEditor::MacAndCheeseEditor (MacAndCheeseProcessor& p) : AudioProcess
     loudAtt = std::make_unique<Attachment> (vts, "loudness", loudKnob);
     smoothAtt = std::make_unique<Attachment> (vts, "smoothing", smoothKnob);
     corrAtt = std::make_unique<Attachment> (vts, "maxCorr", corrKnob);
+
+    unclumpAtt = std::make_unique<Attachment> (vts, "unclump", unclumpKnob);
+    monoAtt = std::make_unique<Attachment> (vts, "monoBase", monoKnob);
+    prepWith.addItemList ({ "Prep with: same cheese", "Prep with: A", "Prep with: B", "Prep with: C" }, 1);
+    addAndMakeVisible (prepWith);
+    prepWithAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (vts, "prepWith", prepWith);
+    addAndMakeVisible (bandMeter);
+    static const char* bandIds[] = { "bandBottom", "bandMud", "bandBody", "bandBite", "bandFizz" };
+    static const char* bandNames[] = { "Bottom", "Mud", "Body", "Bite", "Fizz" };
+    for (int b = 0; b < mm::prepBands; ++b)
+    {
+        auto& sl = bandSliders[(size_t) b];
+        sl.setSliderStyle (juce::Slider::LinearVertical);
+        sl.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 50, 16);
+        sl.setColour (juce::Slider::trackColourId, colours::accent2);
+        sl.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        addChildComponent (sl);
+        bandAtts[(size_t) b] = std::make_unique<Attachment> (vts, bandIds[b], sl);
+        bandLabels[(size_t) b].setText (bandNames[b], juce::dontSendNotification);
+        bandLabels[(size_t) b].setJustificationType (juce::Justification::centred);
+        bandLabels[(size_t) b].setColour (juce::Label::textColourId, colours::dim);
+        addChildComponent (bandLabels[(size_t) b]);
+    }
+    fluffButton.setColour (juce::ToggleButton::tickColourId, colours::accent);
+    addChildComponent (fluffButton);
+    fluffAtt = std::make_unique<ButtonAtt> (vts, "fluff", fluffButton);
 
     eqMode.addItemList ({ "EQ: Linear phase", "EQ: Natural (no pre-echo)" }, 1);
     addAndMakeVisible (eqMode);
@@ -362,7 +415,7 @@ MacAndCheeseEditor::MacAndCheeseEditor (MacAndCheeseProcessor& p) : AudioProcess
     clipSlider.setTooltip ("dB the clipper shaves off the loudest peaks before the limiter (0 = off)");
     addAndMakeVisible (clipSlider);
     clipAtt = std::make_unique<Attachment> (vts, "clip", clipSlider);
-    clipLabel.setText ("Clip", juce::dontSendNotification);
+    clipLabel.setText ("Crisp", juce::dontSendNotification);
     clipLabel.setColour (juce::Label::textColourId, colours::dim);
     addAndMakeVisible (clipLabel);
     ceilingLabel.setText ("Ceiling", juce::dontSendNotification);
@@ -375,7 +428,7 @@ MacAndCheeseEditor::MacAndCheeseEditor (MacAndCheeseProcessor& p) : AudioProcess
     addAndMakeVisible (meter);
 
     levelMatchButton.setClickingTogglesState (true);
-    levelMatchButton.setTooltip ("Hear only the EQ match, at your track's own loudness (no loudness push, clipper or limiter)");
+    levelMatchButton.setTooltip ("Compare fairly: the match at your track's own loudness (no Portion, Crisp or Lid)");
     addAndMakeVisible (levelMatchButton);
     levelMatchAtt = std::make_unique<ButtonAtt> (vts, "levelMatch", levelMatchButton);
     advancedButton.setClickingTogglesState (true);
@@ -400,10 +453,11 @@ MacAndCheeseEditor::~MacAndCheeseEditor()
 void MacAndCheeseEditor::setAdvanced (bool on)
 {
     advanced = on;
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &curve, &midKnob, &sideKnob, &loudKnob, &smoothKnob, &corrKnob,
-                                                                        &midLabel, &sideLabel, &loudLabel, &smoothLabel, &corrLabel, &readout, &eqMode })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &curve, &midKnob, &sideKnob, &smoothKnob, &corrKnob,
+                                                                        &midLabel, &sideLabel, &smoothLabel, &corrLabel, &readout, &eqMode, &fluffButton })
         c->setVisible (on);
-    setSize (width, on ? advancedHeight : simpleHeight);
+    for (int b = 0; b < mm::prepBands; ++b) { bandSliders[(size_t) b].setVisible (on); bandLabels[(size_t) b].setVisible (on); }
+    setSize (on ? mainWidth + recipeWidth : mainWidth, height);
 }
 
 void MacAndCheeseEditor::paint (juce::Graphics& g)
@@ -418,66 +472,103 @@ void MacAndCheeseEditor::paint (juce::Graphics& g)
     g.drawText ("your mac, their cheese", header.withTrimmedLeft (196), juce::Justification::centredLeft);
     g.setColour (colours::line);
     g.drawHorizontalLine (56, 0.0f, (float) getWidth());
-    g.drawHorizontalLine (simpleHeight - 88, 20.0f, (float) getWidth() - 20.0f);
+    g.drawHorizontalLine (topBottom, 20.0f, mainWidth - 20.0f);
+    g.drawHorizontalLine (prepBottom, 20.0f, mainWidth - 20.0f);
+    g.setColour (colours::accent);
+    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+    g.drawText ("PREP  -  fix the mix", 20, topBottom + 6, 300, 14, juce::Justification::left);
+    g.drawText ("BAKE  -  loudness", 20, prepBottom + 6, 300, 14, juce::Justification::left);
     if (advanced)
-        g.drawHorizontalLine (simpleHeight, 20.0f, (float) getWidth() - 20.0f);
+    {
+        g.setColour (colours::line);
+        g.drawVerticalLine (mainWidth, 56.0f, (float) getHeight());
+        g.setColour (colours::accent);
+        g.drawText ("RECIPE", mainWidth + 20, 64, 200, 14, juce::Justification::left);
+    }
 }
 
 void MacAndCheeseEditor::resized()
 {
-    auto r = getLocalBounds();
+    auto r = getLocalBounds().withWidth (mainWidth);
     auto header = r.removeFromTop (56).reduced (20, 14);
     advancedButton.setBounds (header.removeFromRight (100));
     header.removeFromRight (10);
     levelMatchButton.setBounds (header.removeFromRight (120));
 
-    auto main = r.removeFromTop (simpleHeight - 56 - 88).reduced (20, 16);
+    // SAUCE: cheeses, taste, cheesiness, meters
+    auto main = r.removeFromTop (topBottom - 56).reduced (20, 14);
     auto left = main.removeFromLeft (360);
-    auto slotsRow = left.removeFromTop (130);
+    auto slotsRow = left.removeFromTop (110);
     const int w = (slotsRow.getWidth() - 16) / 3;
     for (auto& z : slotZones)
     {
         z.setBounds (slotsRow.removeFromLeft (w));
         slotsRow.removeFromLeft (8);
     }
-    left.removeFromTop (12);
-    learnButton.setBounds (left.removeFromTop (52));
-    left.removeFromTop (8);
+    left.removeFromTop (10);
+    learnButton.setBounds (left.removeFromTop (50));
+    left.removeFromTop (6);
     messageLabel.setBounds (left);
-
     meter.setBounds (main.removeFromRight (90));
     main.removeFromRight (10);
     auto knobArea = main.reduced (6, 0);
     matchLabel.setBounds (knobArea.removeFromBottom (22));
     matchKnob.setBounds (knobArea);
 
-    auto strip = r.removeFromTop (88).reduced (20, 12);
-    limiterReadout.setBounds (strip.removeFromBottom (24));
-    strip.removeFromBottom (4);
-    clipLabel.setBounds (strip.removeFromLeft (34));
-    clipSlider.setBounds (strip.removeFromLeft (180));
-    strip.removeFromLeft (10);
-    limiterButton.setBounds (strip.removeFromLeft (84));
-    truePeakButton.setBounds (strip.removeFromLeft (96));
-    ceilingLabel.setBounds (strip.removeFromLeft (54));
-    ceilingSlider.setBounds (strip);
+    // PREP
+    auto prepArea = r.removeFromTop (prepBottom - topBottom).reduced (20, 0).withTrimmedTop (22).withTrimmedBottom (8);
+    for (auto pair : { std::pair<juce::Slider*, juce::Label*> { &unclumpKnob, &unclumpLabel }, { &monoKnob, &monoLabel } })
+    {
+        auto cell = prepArea.removeFromLeft (90);
+        pair.second->setBounds (cell.removeFromTop (14));
+        pair.first->setBounds (cell);
+    }
+    prepArea.removeFromLeft (10);
+    prepWith.setBounds (prepArea.removeFromLeft (190).withSizeKeepingCentre (190, 26));
+    prepArea.removeFromLeft (14);
+    bandMeter.setBounds (prepArea);
+
+    // BAKE
+    auto bake = r.reduced (20, 0).withTrimmedTop (22).withTrimmedBottom (10);
+    limiterReadout.setBounds (bake.removeFromBottom (22));
+    auto cell = bake.removeFromLeft (90);
+    loudLabel.setBounds (cell.removeFromTop (14));
+    loudKnob.setBounds (cell);
+    bake.removeFromLeft (10);
+    auto row = bake.withSizeKeepingCentre (bake.getWidth(), 28);
+    clipLabel.setBounds (row.removeFromLeft (42));
+    clipSlider.setBounds (row.removeFromLeft (150));
+    row.removeFromLeft (8);
+    limiterButton.setBounds (row.removeFromLeft (60));
+    truePeakButton.setBounds (row.removeFromLeft (96));
+    ceilingLabel.setBounds (row.removeFromLeft (54));
+    ceilingSlider.setBounds (row);
 
     if (advanced)
     {
-        auto adv = r.reduced (20, 14);
-        auto top = adv.removeFromTop (24);
-        eqMode.setBounds (top.removeFromLeft (220));
+        auto adv = getLocalBounds().withTrimmedLeft (mainWidth).withTrimmedTop (84).reduced (20, 10);
+        eqMode.setBounds (adv.removeFromTop (26));
         adv.removeFromTop (8);
-        curve.setBounds (adv.removeFromTop (100));
-        adv.removeFromTop (10);
-        readout.setBounds (adv.removeFromRight (150));
-        const int cw = adv.getWidth() / 5;
+        curve.setBounds (adv.removeFromTop (130));
+        adv.removeFromTop (8);
+        auto knobs = adv.removeFromTop (96);
+        const int cw = knobs.getWidth() / 4;
         for (const auto& pair : { std::pair<juce::Slider*, juce::Label*> { &midKnob, &midLabel }, { &sideKnob, &sideLabel },
-                                  { &loudKnob, &loudLabel }, { &smoothKnob, &smoothLabel }, { &corrKnob, &corrLabel } })
+                                  { &smoothKnob, &smoothLabel }, { &corrKnob, &corrLabel } })
         {
-            auto cell = adv.removeFromLeft (cw).reduced (4, 0);
-            pair.second->setBounds (cell.removeFromTop (16));
-            pair.first->setBounds (cell);
+            auto c = knobs.removeFromLeft (cw).reduced (2, 0);
+            pair.second->setBounds (c.removeFromTop (14));
+            pair.first->setBounds (c);
+        }
+        adv.removeFromTop (8);
+        fluffButton.setBounds (adv.removeFromTop (24));
+        readout.setBounds (adv.removeFromBottom (20));
+        const int bw = adv.getWidth() / mm::prepBands;
+        for (int b = 0; b < mm::prepBands; ++b)
+        {
+            auto c = adv.removeFromLeft (bw).reduced (4, 0);
+            bandLabels[(size_t) b].setBounds (c.removeFromTop (16));
+            bandSliders[(size_t) b].setBounds (c);
         }
     }
 }
@@ -515,6 +606,9 @@ void MacAndCheeseEditor::timerCallback()
     meter.gr = gr;
     meter.clipDb = proc.clipDbNow.load();
     meter.repaint();
+    for (int b = 0; b < mm::prepBands; ++b)
+        bandMeter.db[(size_t) b] = proc.bandReduction[(size_t) b].load();
+    bandMeter.repaint();
 
     auto fmt = [] (double db) { return (db >= 0 ? "+" : "") + juce::String (db, 1) + " dB"; };
     const bool limOn = limiterButton.getToggleState();
@@ -523,19 +617,19 @@ void MacAndCheeseEditor::timerCallback()
     juce::String lim;
     const bool levelMatchOn = levelMatchButton.getToggleState();
     if (levelMatchOn)
-        lim = "Level match: EQ only, at your track's loudness (no clipper, gain or limiter)";
+        lim = "Blind taste: the match at your track's own loudness (no Portion, Crisp or Lid)";
     else
     {
-        lim = (clipSlider.getValue() > 0.01 ? "Clip " + juce::String (proc.clipDbNow.load(), 1) + " dB (max " + juce::String (proc.maxClipDb.load(), 1) + ")"
-                                            : juce::String ("Clip off"))
-              + "   >   Gain " + fmt (proc.gainIntoLimiterDb.load()) + "   >   ";
+        lim = (clipSlider.getValue() > 0.01 ? "Crisp " + juce::String (proc.clipDbNow.load(), 1) + " dB (max " + juce::String (proc.maxClipDb.load(), 1) + ")"
+                                            : juce::String ("Crisp off"))
+              + "   >   Heat " + fmt (proc.gainIntoLimiterDb.load()) + "   >   ";
         if (limOn)
-            lim += "Limiter " + juce::String (juce::jmax (0.0f, -juce::Decibels::gainToDecibels (gr, -60.0f)), 1)
+            lim += "Lid " + juce::String (juce::jmax (0.0f, -juce::Decibels::gainToDecibels (gr, -60.0f)), 1)
                    + " dB (max " + juce::String (proc.maxGrDb.load(), 1) + ")";
         else if (proc.suggestionDb.load() > 0.05f)
             lim += "your limiter: push " + fmt (proc.suggestionDb.load()) + " more, ceiling " + juce::String (ceilingSlider.getValue(), 1) + " dBTP";
         else
-            lim += "no limiter, kept under the ceiling";
+            lim += "no lid, kept under the ceiling";
     }
     limiterReadout.setText (lim, juce::dontSendNotification);
     limiterReadout.setColour (juce::Label::textColourId, levelMatchOn ? colours::accent2 : limOn ? colours::dim : colours::accent);
@@ -550,10 +644,10 @@ void MacAndCheeseEditor::timerCallback()
         curve.repaint();
 
         const bool has = ! snap.midCurve.empty();
-        readout.setText (has ? "Loudness match\n" + fmt (snap.gainDb * match * loudKnob.getValue() * 0.01)
-                                   + "\nReference level\n" + fmt (snap.refLevelDb * match)
-                                   + "\nLatency\n" + juce::String (juce::roundToInt (proc.getLatencySamples() * 1000.0 / juce::jmax (1.0, proc.getSampleRate()))) + " ms"
-                             : juce::String ("Learn your track to see the match"),
+        readout.setText (has ? "Loudness " + fmt (snap.gainDb * match * loudKnob.getValue() * 0.01)
+                                   + "   Ref level " + fmt (snap.refLevelDb * match)
+                                   + "   Latency " + juce::String (juce::roundToInt (proc.getLatencySamples() * 1000.0 / juce::jmax (1.0, proc.getSampleRate()))) + " ms"
+                             : juce::String ("Taste your mac to see the sauce"),
                          juce::dontSendNotification);
     }
 }

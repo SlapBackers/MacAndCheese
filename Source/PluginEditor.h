@@ -80,6 +80,14 @@ namespace ui
         float l = 0, r = 0, gr = 1, clipDb = 0; // gr: limiter gain (linear), clipDb: clipper reduction
         void paint (juce::Graphics&) override;
     };
+
+    // PREP: reduction per band (0-9 dB)
+    class BandMeter : public juce::Component
+    {
+    public:
+        std::array<float, mm::prepBands> db {};
+        void paint (juce::Graphics&) override;
+    };
 }
 
 class MacAndCheeseEditor : public juce::AudioProcessorEditor, private juce::Timer
@@ -104,7 +112,16 @@ private:
     juce::Slider matchKnob;
     juce::Label matchLabel;
     ui::Meter meter;
-    juce::TextButton advancedButton { "Advanced" };
+    juce::TextButton advancedButton { "Recipe" };
+
+    // PREP
+    juce::Slider unclumpKnob, monoKnob;
+    juce::Label unclumpLabel, monoLabel;
+    juce::ComboBox prepWith;
+    ui::BandMeter bandMeter;
+    std::array<juce::Slider, mm::prepBands> bandSliders;
+    std::array<juce::Label, mm::prepBands> bandLabels;
+    juce::ToggleButton fluffButton { "Fluff (allow +3 dB)" };
 
     ui::CurveView curve;
     juce::Slider midKnob, sideKnob, loudKnob, smoothKnob, corrKnob;
@@ -112,19 +129,21 @@ private:
     juce::ComboBox eqMode;
 
     // limiter strip (always visible)
-    juce::ToggleButton limiterButton { "Limiter" }, truePeakButton { "True peak" };
-    juce::TextButton levelMatchButton { "Level match" };
+    juce::ToggleButton limiterButton { "Lid" }, truePeakButton { "True peak" };
+    juce::TextButton levelMatchButton { "Blind taste" };
     juce::Slider ceilingSlider, clipSlider;
     juce::Label ceilingLabel, clipLabel, limiterReadout;
 
     using Attachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
-    std::unique_ptr<Attachment> matchAtt, midAtt, sideAtt, loudAtt, smoothAtt, corrAtt, ceilingAtt, clipAtt;
-    std::unique_ptr<ButtonAtt> limiterAtt, truePeakAtt, levelMatchAtt;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;
+    std::unique_ptr<Attachment> matchAtt, midAtt, sideAtt, loudAtt, smoothAtt, corrAtt, ceilingAtt, clipAtt, unclumpAtt, monoAtt;
+    std::array<std::unique_ptr<Attachment>, mm::prepBands> bandAtts;
+    std::unique_ptr<ButtonAtt> limiterAtt, truePeakAtt, levelMatchAtt, fluffAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt, prepWithAtt;
 
     bool advanced = false;
-    static constexpr int simpleHeight = 494, advancedHeight = 780, width = 700;
+    static constexpr int height = 590, mainWidth = 720, recipeWidth = 380;
+    static constexpr int topBottom = 330, prepBottom = 452; // section boundaries (y)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MacAndCheeseEditor)
 };

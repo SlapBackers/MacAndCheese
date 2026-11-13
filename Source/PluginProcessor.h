@@ -12,6 +12,7 @@
 #include "Core/HyraxLimiter.h"
 #include "Core/PartitionedConvolver.h"
 #include "Core/ClipOnly2.h"
+#include "Core/Prep.h"
 
 class MacAndCheeseProcessor : public juce::AudioProcessor, private juce::Timer
 {
@@ -79,6 +80,7 @@ public:
 
     // Learn quality: how much the learned spectrum still changes between checks (-1 = not measured yet)
     std::atomic<float> learnDeviationDb { -1.0f };
+    std::array<std::atomic<float>, mm::prepBands> bandReduction {}; // PREP: dB per band (Bottom..Fizz)
     std::atomic<bool> learnEnough { false };
 
     juce::AudioProcessorValueTreeState apvts;
@@ -89,6 +91,7 @@ private:
         std::shared_ptr<mm::ReferenceProfile> ref;
         std::shared_ptr<mm::MatchResult> result;
         juce::String name;
+        mm::BandStats bands; // PREP statistics of this reference
     };
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -110,6 +113,13 @@ private:
     std::array<Slot, numSlots> slots;
     std::array<std::atomic<bool>, numSlots> slotBusy {};
     std::shared_ptr<mm::TargetProfile> track;
+    mm::BandStats trackBands;                 // PREP statistics of the learned track (guarded by dataLock)
+    mm::Prep prep;                            // audio thread
+    mm::PrepSettings prepSettings() const;
+    int prepRefFor (int slot) const;          // "Prep with": Same -> slot itself
+    void applyPrepStats();                    // message thread
+    juce::String lastPrepKey;
+    double prepChangedAt = 0.0;
     bool restoredFromProject = false; // guarded by dataLock
     juce::String message;
     bool messageIsError = false;
@@ -181,6 +191,11 @@ private:
     std::atomic<float>* pCeiling = nullptr;
     std::atomic<float>* pClip = nullptr;
     std::atomic<float>* pLevelMatch = nullptr;
+    std::atomic<float>* pUnclump = nullptr;
+    std::atomic<float>* pMonoBase = nullptr;
+    std::atomic<float>* pPrepWith = nullptr;
+    std::atomic<float>* pFluff = nullptr;
+    std::array<std::atomic<float>*, mm::prepBands> pBand {};
     std::atomic<float>* pProfile = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MacAndCheeseProcessor)
