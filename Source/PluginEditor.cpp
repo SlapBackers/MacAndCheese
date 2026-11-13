@@ -468,7 +468,7 @@ void MacAndCheeseEditor::resized()
         auto top = adv.removeFromTop (24);
         eqMode.setBounds (top.removeFromLeft (220));
         adv.removeFromTop (8);
-        curve.setBounds (adv.removeFromTop (170));
+        curve.setBounds (adv.removeFromTop (100));
         adv.removeFromTop (10);
         readout.setBounds (adv.removeFromRight (150));
         const int cw = adv.getWidth() / 5;

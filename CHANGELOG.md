@@ -2,6 +2,11 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MacAndCheese/releases).
 
+## v2.1.4 — fixes
+
+- Learn says "enough" more readily on real songs: the spectrum may change up to 1 dB on average (was 0.5), and the loudest part only counts as beaten when a later part is more than 1 dB louder (songs often end on their loudest chorus).
+- Advanced panel shorter (780 px) so it fits on laptop screens inside the DAW window.
+
 ## v2.1.3 — Learn knows when it's enough, cheesier look
 
 - **Learn quality fixed**: it used to never say "enough" on real songs, because the analysis re-sliced the whole capture at every check. It now works on fixed 15 s slices and says "enough" when the loudest part hasn't been beaten for 30 s, or when the spectrum (60 Hz–12 kHz) changes less than 0.5 dB on average.

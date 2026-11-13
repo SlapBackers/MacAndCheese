@@ -124,7 +124,7 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;
 
     bool advanced = false;
-    static constexpr int simpleHeight = 494, advancedHeight = 850, width = 700;
+    static constexpr int simpleHeight = 494, advancedHeight = 780, width = 700;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MacAndCheeseEditor)
 };

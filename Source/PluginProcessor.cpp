@@ -389,8 +389,8 @@ void MacAndCheeseProcessor::stopLearning()
 }
 
 // Learn quality, on fixed 15 s slices of the capture (boundaries never move as it grows):
-// "enough" once the loudest slice hasn't been beaten for 30 s, or the averaged spectrum of the
-// loudest slices changes < 0.5 dB on average (60 Hz - 12 kHz) for two slices in a row.
+// "enough" once the loudest slice hasn't been beaten (by > 1 dB) for 30 s, or the averaged spectrum of
+// the loudest slices changes < 1 dB on average (60 Hz - 12 kHz) for two slices in a row.
 void MacAndCheeseProcessor::checkLearnQuality()
 {
     const int sliceLen = (int) (15.0 * captureRate);
@@ -432,7 +432,7 @@ void MacAndCheeseProcessor::checkLearnQuality()
         double top = -1e9;
         int loudest = 0;
         for (int i = 0; i < (int) learnSlices.size(); ++i)
-            if (learnSlices[(size_t) i].rmsDb > top) { top = learnSlices[(size_t) i].rmsDb; loudest = i; }
+            if (learnSlices[(size_t) i].rmsDb > top + (i > 0 ? 1.0 : 0.0)) { top = learnSlices[(size_t) i].rmsDb; loudest = i; }
         std::vector<double> shape (edges.size(), 0.0);
         for (const auto& s : learnSlices)
             if (s.rmsDb > top - 3.0)
@@ -448,7 +448,7 @@ void MacAndCheeseProcessor::checkLearnQuality()
         }
         for (auto& v : shape) v -= mean;
         learnShape = shape;
-        learnStableChecks = dev >= 0.0f && dev < 0.5f ? learnStableChecks + 1 : 0;
+        learnStableChecks = dev >= 0.0f && dev < 1.0f ? learnStableChecks + 1 : 0;
         const bool loudestHeard = (int) learnSlices.size() - 1 - loudest >= 2; // loudest not beaten for 30 s
         if (learnState == LearnState::listening)
         {
@@ -569,7 +569,7 @@ MacAndCheeseProcessor::Snapshot MacAndCheeseProcessor::getSnapshot() const
             s.message = "Enough - the sound of your track is stable, you can press Stop";
         else if (dev < 0.0f)
             s.message = "Listening - play the loudest part of your track";
-        else if (dev < 0.5f)
+        else if (dev < 1.0f)
             s.message = "Almost there - keep playing (at least 30 s, loudest part included)";
         else
             s.message = "Keep playing - the sound is still changing (" + juce::String (dev, 1) + " dB). Include the loudest part";
