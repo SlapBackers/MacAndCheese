@@ -259,7 +259,7 @@ int main (int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI gui;
     if (argc > 3 && juce::String (argv[1]) == "--real")
-        return realTest (juce::File (argv[2]), juce::File (argv[3]));
+        return realTest (juce::File (juce::String::fromUTF8 (argv[2])), juce::File (juce::String::fromUTF8 (argv[3])));
     if (argc > 2 && juce::String (argv[1]) == "--load-vst3")
         return loadVst3 (argv[2]);
     const juce::File outDir (argc > 1 ? argv[1] : juce::File::getCurrentWorkingDirectory().getFullPathName());
