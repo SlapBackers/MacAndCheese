@@ -2,7 +2,16 @@
 
 Reference mastering as a VST3 plugin: a semi-real-time version of [Matchering](https://github.com/sergree/matchering), running live in your DAW.
 
-> **Status: V1, built in public.** macOS (Apple Silicon), VST3 only.
+> **Status: built in public.** macOS (Apple Silicon + Intel), VST3.
+
+## Download
+
+Get the latest `MatchMaster-vX.Y.Z-macOS-VST3.zip` from **[Releases](https://github.com/SlapBackers/MatchMaster/releases)** — what changed is in the [CHANGELOG](CHANGELOG.md).
+
+1. Unzip and copy `MatchMaster.vst3` to `~/Library/Audio/Plug-Ins/VST3`
+2. The plugin is not notarised by Apple yet. If your DAW doesn't show it, run once in Terminal:
+   `xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/MatchMaster.vst3`
+3. Rescan plugins in your DAW.
 
 ## How it works
 
