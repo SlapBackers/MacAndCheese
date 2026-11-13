@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="940" viewBox="0 0 900 940" font-family="Helvetica, Arial" font-size="11">
+<rect id="background" x="0" y="0" width="900" height="600" fill="#111318"/>
+<rect id="background_advanced" x="0" y="640" width="900" height="300" fill="#111318"/>
+<g id="header"><rect x="0" y="0" width="900" height="56" rx="6" fill="none" stroke="#3a4050" stroke-dasharray="4 4"/><text x="6" y="14" fill="#c8ccd6">header: logo 'Mac and Cheese' + tagline</text></g>
+<g id="levelMatch"><rect x="640" y="12" width="120" height="32" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="646" y="26" fill="#c8ccd6">Level match (toggle)</text></g>
+<g id="advanced"><rect x="772" y="12" width="108" height="32" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="778" y="26" fill="#c8ccd6">Advanced (toggle)</text></g>
+<g id="slotA"><rect x="20" y="76" width="124" height="120" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="26" y="90" fill="#c8ccd6">Cheese A</text></g>
+<g id="slotB"><rect x="152" y="76" width="124" height="120" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="158" y="90" fill="#c8ccd6">Cheese B</text></g>
+<g id="slotC"><rect x="284" y="76" width="124" height="120" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="290" y="90" fill="#c8ccd6">Cheese C</text></g>
+<g id="learn"><rect x="20" y="208" width="388" height="52" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="26" y="222" fill="#c8ccd6">Learn / Stop + time + 'keep playing'/'enough'</text></g>
+<g id="message"><rect x="20" y="268" width="388" height="40" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="26" y="282" fill="#c8ccd6">message line (one sentence)</text></g>
+<g id="match"><circle cx="565.0" cy="185.0" r="102" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="456" y="300" fill="#c8ccd6">MATCH knob 0-100 % (hero)</text></g>
+<g id="meter_L"><rect x="720" y="76" width="34" height="230" rx="6" fill="#20242c" stroke="#36c9b4" stroke-dasharray="0"/><text x="726" y="90" fill="#c8ccd6">L</text></g>
+<g id="meter_R"><rect x="762" y="76" width="34" height="230" rx="6" fill="#20242c" stroke="#36c9b4" stroke-dasharray="0"/><text x="768" y="90" fill="#c8ccd6">R</text></g>
+<g id="meter_clip"><rect x="804" y="76" width="34" height="230" rx="6" fill="#20242c" stroke="#36c9b4" stroke-dasharray="0"/><text x="810" y="90" fill="#c8ccd6">CLIP</text></g>
+<g id="meter_lim"><rect x="846" y="76" width="34" height="230" rx="6" fill="#20242c" stroke="#36c9b4" stroke-dasharray="0"/><text x="852" y="90" fill="#c8ccd6">LIM</text></g>
+<g id="fix_section"><rect x="0" y="326" width="900" height="110" rx="6" fill="none" stroke="#3a4050" stroke-dasharray="4 4"/><text x="6" y="340" fill="#c8ccd6">FIX (v2.2) - leave room</text></g>
+<g id="dynamic"><circle cx="60.0" cy="380.0" r="27" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="26" y="420" fill="#c8ccd6">Dynamic match</text></g>
+<g id="monoBass"><circle cx="160.0" cy="380.0" r="27" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="126" y="420" fill="#c8ccd6">Mono bass Hz</text></g>
+<g id="fixFrom"><rect x="220" y="366" width="160" height="32" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="226" y="380" fill="#c8ccd6">Fix from: Same/A/B/C</text></g>
+<g id="dyn_band_meters"><rect x="400" y="346" width="300" height="80" rx="6" fill="#20242c" stroke="#36c9b4" stroke-dasharray="0"/><text x="406" y="360" fill="#c8ccd6">5 band GR meters (sub mud mid pres top)</text></g>
+<g id="output_section"><rect x="0" y="446" width="900" height="154" rx="6" fill="none" stroke="#3a4050" stroke-dasharray="4 4"/><text x="6" y="460" fill="#c8ccd6">OUTPUT: Clipper > Gain > Limiter</text></g>
+<g id="clip"><circle cx="60.0" cy="500.0" r="27" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="26" y="540" fill="#c8ccd6">Clip 0-6 dB</text></g>
+<g id="gain_readout"><rect x="120" y="486" width="120" height="40" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="126" y="500" fill="#c8ccd6">Gain +x.x dB (readout)</text></g>
+<g id="limiter"><rect x="260" y="486" width="100" height="32" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="266" y="500" fill="#c8ccd6">Limiter on/off</text></g>
+<g id="truePeak"><rect x="370" y="486" width="110" height="32" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="376" y="500" fill="#c8ccd6">True peak on/off</text></g>
+<g id="ceiling"><circle cx="540.0" cy="500.0" r="27" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="506" y="540" fill="#c8ccd6">Ceiling -6..0 dB</text></g>
+<g id="output_readout"><rect x="20" y="560" width="860" height="28" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="26" y="574" fill="#c8ccd6">readout: Clip x dB > Gain +x dB > Limiter x dB</text></g>
+<g id="advanced_panel"><rect x="0" y="640" width="900" height="300" rx="6" fill="none" stroke="#3a4050" stroke-dasharray="4 4"/><text x="6" y="654" fill="#c8ccd6">ADVANCED panel (shown under the main panel)</text></g>
+<g id="eqMode"><rect x="20" y="656" width="220" height="28" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="26" y="670" fill="#c8ccd6">EQ mode: Linear / Natural</text></g>
+<g id="eq_curve"><rect x="20" y="694" width="860" height="150" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="26" y="708" fill="#c8ccd6">EQ curve: Mid + Side, +/-18 dB, 20 Hz-20 kHz (drawn by code)</text></g>
+<g id="midEq"><circle cx="60.0" cy="886.0" r="25" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="26" y="924" fill="#c8ccd6">Mid EQ %</text></g>
+<g id="sideEq"><circle cx="190.0" cy="886.0" r="25" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="156" y="924" fill="#c8ccd6">Side EQ %</text></g>
+<g id="loudness"><circle cx="320.0" cy="886.0" r="25" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="286" y="924" fill="#c8ccd6">Loudness %</text></g>
+<g id="smoothing"><circle cx="450.0" cy="886.0" r="25" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="416" y="924" fill="#c8ccd6">Smoothing %</text></g>
+<g id="maxCorr"><circle cx="580.0" cy="886.0" r="25" fill="#2a2f3a" stroke="#e0a030" stroke-width="2"/><text x="546" y="924" fill="#c8ccd6">Max corr. dB</text></g>
+<g id="info_readout"><rect x="680" y="854" width="200" height="76" rx="6" fill="#2a2f3a" stroke="#6b7385" stroke-dasharray="0"/><text x="686" y="868" fill="#c8ccd6">Loudness match / reference level / latency</text></g>
+</svg>

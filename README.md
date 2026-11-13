@@ -1,6 +1,8 @@
-# MatchMaster
+# Mac and Cheese
 
-> **Based on [Matchering](https://github.com/sergree/matchering) by Sergree.** MatchMaster is a real-time C++ port of Matchering's algorithm, packaged as a VST3. It is a separate project, not affiliated with Matchering — see [NOTICE](NOTICE).
+*Your mac, their cheese.* Your track is the mac; a great-sounding reference song is the cheese. Mac and Cheese pours the reference's tone and loudness over your track, live in your DAW. (Formerly MatchMaster.)
+
+> **Based on [Matchering](https://github.com/sergree/matchering) by Sergree.** Mac and Cheese is a real-time C++ port of Matchering's algorithm, packaged as a VST3. It is a separate project, not affiliated with Matchering — see [NOTICE](NOTICE).
 
 Reference mastering as a VST3 plugin: a semi-real-time version of Matchering, running live in your DAW.
 
@@ -8,11 +10,11 @@ Reference mastering as a VST3 plugin: a semi-real-time version of Matchering, ru
 
 ## Download
 
-Get the latest `MatchMaster-vX.Y.Z-macOS-VST3.zip` from **[Releases](https://github.com/SlapBackers/MatchMaster/releases)** — what changed is in the [CHANGELOG](CHANGELOG.md).
+Get the latest `MacAndCheese-vX.Y.Z-macOS-VST3.zip` from **[Releases](https://github.com/SlapBackers/MacAndCheese/releases)** — what changed is in the [CHANGELOG](CHANGELOG.md).
 
-1. Unzip and copy `MatchMaster.vst3` to `~/Library/Audio/Plug-Ins/VST3`
+1. Unzip and copy `Mac and Cheese.vst3` to `~/Library/Audio/Plug-Ins/VST3`
 2. The plugin is not notarised by Apple yet. If your DAW doesn't show it, run once in Terminal:
-   `xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/MatchMaster.vst3`
+   `xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/VST3/Mac and Cheese.vst3"`
 3. Rescan plugins in your DAW.
 
 ## How it works
@@ -32,7 +34,7 @@ Re-learn after big mix changes. References and the learned match are saved with 
 
 A C++ port of Matchering's processing, run in real time:
 
-| Matchering stage | MatchMaster |
+| Matchering stage | Mac and Cheese |
 |---|---|
 | Loudness match on the loudest ~15 s pieces (mid channel) | same, measured during Learn |
 | Matching EQ: averaged spectra of reference ÷ track, smoothed (cubic spline + LOWESS) | same, applied as a linear-phase FIR, separately on Mid and Side |
@@ -48,27 +50,25 @@ Latency is reported to the host (≈ 95 ms at 48 kHz in Linear mode, ≈ 10 ms i
 Requires CMake ≥ 3.22 and Xcode command line tools.
 
 ```bash
-git clone --recurse-submodules https://github.com/SlapBackers/MatchMaster.git
-cd MatchMaster
+git clone --recurse-submodules https://github.com/SlapBackers/MacAndCheese.git
+cd MacAndCheese
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target MatchMaster_VST3 -j
+cmake --build build --target MacAndCheese_VST3 -j
 ```
 
-The plugin is at `build/MatchMaster_artefacts/Release/VST3/MatchMaster.vst3` — copy it to `~/Library/Audio/Plug-Ins/VST3`.
+The plugin is at `build/MacAndCheese_artefacts/Release/VST3/Mac and Cheese.vst3` — copy it to `~/Library/Audio/Plug-Ins/VST3`.
 
 ### Tests
 
 ```bash
-cmake --build build --target MatchMasterCLI MatchMasterFlowTest -j
-./build/MatchMasterCLI_artefacts/Release/MatchMasterCLI selftest          # matching maths
-./build/MatchMasterFlowTest_artefacts/Release/MatchMasterFlowTest.app/Contents/MacOS/MatchMasterFlowTest /tmp/mm   # full plugin flow + GUI renders
+cmake --build build --target MacAndCheeseCLI MacAndCheeseFlowTest -j
+./build/MacAndCheeseCLI_artefacts/Release/MacAndCheeseCLI selftest          # matching maths
+./build/MacAndCheeseFlowTest_artefacts/Release/MacAndCheeseFlowTest.app/Contents/MacOS/MacAndCheeseFlowTest /tmp/mm   # full plugin flow + GUI renders
 ```
-
-`MatchMasterCLI match <track> <reference> <out.wav>` renders a file offline with the same chain.
 
 ## Roadmap
 
-Where MatchMaster is going (fix-the-mix section, Airwindows character stage, new GUI) is in **[ROADMAP.md](ROADMAP.md)**.
+Where Mac and Cheese is going (fix-the-mix section, Airwindows character stage, new GUI) is in **[ROADMAP.md](ROADMAP.md)**.
 
 ## Credits & license
 
@@ -76,4 +76,4 @@ Where MatchMaster is going (fix-the-mix section, Airwindows character stage, new
 - Clipper: [ClipOnly2](https://github.com/airwindows/airwindows) by Chris Johnson / Airwindows, MIT licence
 - Framework: [JUCE](https://juce.com) (AGPLv3 / commercial)
 
-MatchMaster is free software under the **GNU GPL v3** – see [LICENSE](LICENSE).
+Mac and Cheese is free software under the **GNU GPL v3** – see [LICENSE](LICENSE).

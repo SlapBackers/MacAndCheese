@@ -1,8 +1,8 @@
-MatchMaster
+Mac and Cheese (formerly MatchMaster)
 Copyright (C) 2026 SlapBackers
 Licensed under the GNU General Public License v3 (see LICENSE).
 
-MatchMaster is a real-time C++ port of the algorithm of Matchering:
+Mac and Cheese is a real-time C++ port of the algorithm of Matchering:
   Matchering - Audio Matching and Mastering Python Library
   Copyright (C) 2016-2022 Sergree
   https://github.com/sergree/matchering
@@ -11,7 +11,7 @@ MatchMaster is a real-time C++ port of the algorithm of Matchering:
 The following parts are direct ports of Matchering's code and keep its behaviour:
   Source/Core/Matcher.cpp     (level matching, matching EQ, smoothing, RMS correction)
   Source/Core/HyraxLimiter.h  (the "Hyrax" limiter, adapted to real time)
-MatchMaster is not affiliated with or endorsed by the Matchering project.
+Mac and Cheese is not affiliated with or endorsed by the Matchering project.
 
 The clipper (Source/Core/ClipOnly2.h) is a port of ClipOnly2 by Chris Johnson / Airwindows:
   https://github.com/airwindows/airwindows

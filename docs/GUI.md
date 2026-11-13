@@ -1,4 +1,4 @@
-# MatchMaster GUI spec (v2.1.1)
+# Mac and Cheese GUI spec (v2.1.2)
 
 Everything a GUI designer needs: what the user can touch, what the plugin shows, and in which states.
 The current GUI (`Source/PluginEditor.cpp`) is a functional placeholder; this spec is the contract a new design must cover.
@@ -78,9 +78,15 @@ Two clearly separated sections, both driven by the references:
 
 Inspired by Brainworx bx_meter: a moving dynamic-range readout (peak-to-loudness) whose colour goes from green to red, plus LUFS (short-term / integrated) and true peak. Design room for it.
 
-## What to deliver
+## Workflow: from your design to the plugin
 
-- One mock-up per state above (Figma frames are ideal), at 1×, with layer names matching the control IDs.
-- Knob/slider/button assets: SVG preferred, or PNG at 2× (filmstrip or body + pointer).
-- Fonts (with a licence allowing embedding in software), colour tokens, spacing.
-- Fixed size (e.g. 900 × 560) or resizable — say which.
+1. **Start from [`design/template.svg`](../design/template.svg)** (opens in Figma, Illustrator, Affinity). It holds every control as a placeholder; **layer name = control ID** from the tables above. The advanced panel sits under the main panel.
+2. **Restyle freely**: move, resize, redraw. Two rules: keep the layer names, one layer (or group) per control.
+3. **Export into `design/`**:
+   - `background.png` and `background@2x.png` (and `background_advanced`), *without* the controls;
+   - knobs: `knob_<id>_body.svg` + `knob_<id>_pointer.svg` (or a PNG filmstrip, 128 frames);
+   - toggles/buttons: `<id>_on` / `<id>_off`;
+   - fonts (licence allowing embedding) and a list of colours;
+   - your layered source file, so positions and sizes can be read.
+4. **I build it in code** and send back renders of every state from the test tool, next to your mock-ups.
+5. **We iterate** on the differences.

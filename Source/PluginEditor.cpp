@@ -137,12 +137,12 @@ void DropZone::filesDropped (const juce::StringArray& files, int, int)
 
 bool LearnButton::isEnabledForClick() const
 {
-    return state != MatchMasterProcessor::LearnState::analysing;
+    return state != MacAndCheeseProcessor::LearnState::analysing;
 }
 
 void LearnButton::paint (juce::Graphics& g)
 {
-    using LS = MatchMasterProcessor::LearnState;
+    using LS = MacAndCheeseProcessor::LearnState;
     auto r = getLocalBounds().toFloat().reduced (1.0f);
     const bool listening = state == LS::listening;
 
@@ -280,11 +280,11 @@ void Meter::paint (juce::Graphics& g)
 
 // ================================================================== Editor
 
-MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorEditor (p), proc (p)
+MacAndCheeseEditor::MacAndCheeseEditor (MacAndCheeseProcessor& p) : AudioProcessorEditor (p), proc (p)
 {
     setLookAndFeel (&lnf);
     const char* letters[] = { "A", "B", "C" };
-    for (int i = 0; i < MatchMasterProcessor::numSlots; ++i)
+    for (int i = 0; i < MacAndCheeseProcessor::numSlots; ++i)
     {
         auto& z = slotZones[(size_t) i];
         z.letter = letters[i];
@@ -295,7 +295,7 @@ MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorE
 
     learnButton.onClick = [this]
     {
-        if (proc.getLearnState() == MatchMasterProcessor::LearnState::listening) proc.stopLearning();
+        if (proc.getLearnState() == MacAndCheeseProcessor::LearnState::listening) proc.stopLearning();
         else proc.startLearning();
     };
     addAndMakeVisible (learnButton);
@@ -390,12 +390,12 @@ MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorE
     startTimerHz (30);
 }
 
-MatchMasterEditor::~MatchMasterEditor()
+MacAndCheeseEditor::~MacAndCheeseEditor()
 {
     setLookAndFeel (nullptr);
 }
 
-void MatchMasterEditor::setAdvanced (bool on)
+void MacAndCheeseEditor::setAdvanced (bool on)
 {
     advanced = on;
     for (juce::Component* c : std::initializer_list<juce::Component*> { &curve, &midKnob, &sideKnob, &loudKnob, &smoothKnob, &corrKnob,
@@ -404,16 +404,16 @@ void MatchMasterEditor::setAdvanced (bool on)
     setSize (width, on ? advancedHeight : simpleHeight);
 }
 
-void MatchMasterEditor::paint (juce::Graphics& g)
+void MacAndCheeseEditor::paint (juce::Graphics& g)
 {
     g.fillAll (colours::bg);
     auto header = getLocalBounds().removeFromTop (56).reduced (20, 0);
     g.setColour (colours::text);
     g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
-    g.drawText ("MATCHMASTER", header, juce::Justification::centredLeft);
+    g.drawText ("MAC AND CHEESE", header, juce::Justification::centredLeft);
     g.setColour (colours::dim);
     g.setFont (juce::FontOptions (12.0f));
-    g.drawText ("reference mastering", header.withTrimmedLeft (156), juce::Justification::centredLeft);
+    g.drawText ("your mac, their cheese", header.withTrimmedLeft (196), juce::Justification::centredLeft);
     g.setColour (colours::line);
     g.drawHorizontalLine (56, 0.0f, (float) getWidth());
     g.drawHorizontalLine (simpleHeight - 88, 20.0f, (float) getWidth() - 20.0f);
@@ -421,7 +421,7 @@ void MatchMasterEditor::paint (juce::Graphics& g)
         g.drawHorizontalLine (simpleHeight, 20.0f, (float) getWidth() - 20.0f);
 }
 
-void MatchMasterEditor::resized()
+void MacAndCheeseEditor::resized()
 {
     auto r = getLocalBounds();
     auto header = r.removeFromTop (56).reduced (20, 14);
@@ -480,11 +480,11 @@ void MatchMasterEditor::resized()
     }
 }
 
-void MatchMasterEditor::timerCallback()
+void MacAndCheeseEditor::timerCallback()
 {
     const auto snap = proc.getSnapshot();
     const int active = proc.getActiveSlot();
-    for (int i = 0; i < MatchMasterProcessor::numSlots; ++i)
+    for (int i = 0; i < MacAndCheeseProcessor::numSlots; ++i)
     {
         auto& z = slotZones[(size_t) i];
         const auto& info = snap.slots[(size_t) i];

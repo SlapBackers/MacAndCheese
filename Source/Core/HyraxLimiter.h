@@ -1,5 +1,5 @@
 /*
-    MatchMaster - real-time port of Matchering's "Hyrax" brickwall limiter (GPLv3).
+    Mac and Cheese - real-time port of Matchering's "Hyrax" brickwall limiter (GPLv3).
     The original (limiter/hyrax.py) is non-causal (centered max filter + filtfilt);
     here the same gain envelope is computed with a fixed lookahead, reported as latency.
 */

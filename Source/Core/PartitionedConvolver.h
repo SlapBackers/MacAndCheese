@@ -1,5 +1,5 @@
 /*
-    MatchMaster - uniformly-partitioned overlap-save FFT convolution with click-free filter swaps.
+    Mac and Cheese - uniformly-partitioned overlap-save FFT convolution with click-free filter swaps.
 
     Filters ("kernels") are prepared on any non-audio thread with makeKernel() and handed over with
     offer(). The audio thread installs the newest offered kernel at a block boundary and crossfades
@@ -103,8 +103,6 @@ public:
     // Free kernels the audio thread has finished with. Call from the thread that offers.
     void collectGarbage() { delete retired.exchange (nullptr, std::memory_order_acq_rel); }
 
-    bool isCrossfading() const noexcept { return previous != nullptr; }
-    int getLatency() const noexcept { return blockSize; }
 
     // Audio thread. In place, any number of samples.
     void process (float* data, int n) noexcept

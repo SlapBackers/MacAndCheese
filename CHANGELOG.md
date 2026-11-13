@@ -1,6 +1,13 @@
 # Changelog
 
-Download the plugin from the [Releases page](https://github.com/SlapBackers/MatchMaster/releases).
+Download the plugin from the [Releases page](https://github.com/SlapBackers/MacAndCheese/releases).
+
+## v2.1.2 — MatchMaster is now Mac and Cheese
+
+- **New name: Mac and Cheese.** *Your mac, their cheese*: your track is the mac, the reference is the cheese. The plugin's internal ID is unchanged, so DAWs treat it as the same plugin; saved projects keep their settings.
+- File is now `Mac and Cheese.vst3`: remove the old `MatchMaster.vst3` before installing, so the DAW doesn't see the same plugin twice.
+- `design/template.svg` + workflow in `docs/GUI.md`: the starting point for designing the GUI.
+- Leaner code: removed the outdated offline `match` command (it no longer matched the plugin's chain) and unused code.
 
 ## v2.1.1 — clearer output stages, level match, Learn quality
 

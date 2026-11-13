@@ -13,7 +13,7 @@ namespace
     constexpr float clipSoftStart = 0.9549925859f; // ClipOnly2 starts softening here (-0.2 dB)
 }
 
-MatchMasterProcessor::MatchMasterProcessor()
+MacAndCheeseProcessor::MacAndCheeseProcessor()
     : AudioProcessor (BusesProperties()
                           .withInput ("Input", juce::AudioChannelSet::stereo(), true)
                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
@@ -39,14 +39,14 @@ MatchMasterProcessor::MatchMasterProcessor()
     builder.startThread (juce::Thread::Priority::high);
 }
 
-MatchMasterProcessor::~MatchMasterProcessor()
+MacAndCheeseProcessor::~MacAndCheeseProcessor()
 {
     stopTimer();
     builder.stopThread (4000);
     pool.removeAllJobs (true, 10000);
 }
 
-juce::AudioProcessorValueTreeState::ParameterLayout MatchMasterProcessor::createLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout MacAndCheeseProcessor::createLayout()
 {
     using F = juce::AudioParameterFloat;
     using B = juce::AudioParameterBool;
@@ -78,7 +78,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MatchMasterProcessor::create
     return l;
 }
 
-bool MatchMasterProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool MacAndCheeseProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto out = layouts.getMainOutputChannelSet();
     if (out != juce::AudioChannelSet::stereo() && out != juce::AudioChannelSet::mono())
@@ -86,7 +86,7 @@ bool MatchMasterProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
     return layouts.getMainInputChannelSet() == out;
 }
 
-void MatchMasterProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void MacAndCheeseProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     hostRate = sampleRate;
     maxBlock = juce::jmax (1, samplesPerBlock);
@@ -115,13 +115,13 @@ void MatchMasterProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     updateLatency();
 }
 
-void MatchMasterProcessor::updateLatency()
+void MacAndCheeseProcessor::updateLatency()
 {
     const bool natural = pEqMode->load() > 0.5f;
     setLatencySamples ((natural ? 0 : firSize / 2) + convBlock + clipper.getLatencySamples() + limiter.getLatencySamples());
 }
 
-void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+void MacAndCheeseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
     juce::ScopedNoDenormals noDenormals;
     const int numCh = juce::jmin (buffer.getNumChannels(), 2);
@@ -264,19 +264,19 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
 // ------------------------------------------------------------------ references / learn
 
-mm::Config MatchMasterProcessor::configFor (double frac) const
+mm::Config MacAndCheeseProcessor::configFor (double frac) const
 {
     auto c = config;
     c.lowessFrac = frac;
     return c;
 }
 
-double MatchMasterProcessor::currentFrac() const
+double MacAndCheeseProcessor::currentFrac() const
 {
     return mm::lowessFracForSmoothing (pSmoothing->load() * 0.01);
 }
 
-void MatchMasterProcessor::loadReference (int slot, const juce::File& file)
+void MacAndCheeseProcessor::loadReference (int slot, const juce::File& file)
 {
     if (slot < 0 || slot >= numSlots || ! file.existsAsFile() || slotBusy[(size_t) slot])
         return;
@@ -318,18 +318,18 @@ void MatchMasterProcessor::loadReference (int slot, const juce::File& file)
     selectSlot (slot);
 }
 
-void MatchMasterProcessor::selectSlot (int slot)
+void MacAndCheeseProcessor::selectSlot (int slot)
 {
     if (auto* p = apvts.getParameter ("profile"))
         p->setValueNotifyingHost (p->convertTo0to1 ((float) slot));
 }
 
-int MatchMasterProcessor::getActiveSlot() const
+int MacAndCheeseProcessor::getActiveSlot() const
 {
     return juce::jlimit (0, numSlots - 1, (int) std::lround (pProfile->load()));
 }
 
-void MatchMasterProcessor::startLearning()
+void MacAndCheeseProcessor::startLearning()
 {
     if (capturing.load() || learnState != LearnState::idle)
         return;
@@ -350,7 +350,7 @@ void MatchMasterProcessor::startLearning()
     capturing.store (true, std::memory_order_release);
 }
 
-void MatchMasterProcessor::stopLearning()
+void MacAndCheeseProcessor::stopLearning()
 {
     if (learnState != LearnState::listening)
         return;
@@ -391,7 +391,7 @@ void MatchMasterProcessor::stopLearning()
 
 // Learn quality: re-run the track analysis on what has been captured so far and see whether the
 // spectrum of the loudest parts (what the match is built from) has stopped changing.
-void MatchMasterProcessor::checkLearnQuality()
+void MacAndCheeseProcessor::checkLearnQuality()
 {
     constexpr double checkEvery = 4.0, minSeconds = 30.0;
     constexpr float stableDb = 0.5f;
@@ -449,7 +449,7 @@ void MatchMasterProcessor::checkLearnQuality()
     });
 }
 
-void MatchMasterProcessor::matchSlots (std::vector<int> which)
+void MacAndCheeseProcessor::matchSlots (std::vector<int> which)
 {
     std::shared_ptr<mm::TargetProfile> t;
     double frac;
@@ -485,7 +485,7 @@ void MatchMasterProcessor::matchSlots (std::vector<int> which)
     resultsChanged = true;
 }
 
-void MatchMasterProcessor::resmooth (double frac)
+void MacAndCheeseProcessor::resmooth (double frac)
 {
     for (int i = 0; i < numSlots; ++i)
     {
@@ -507,23 +507,23 @@ void MatchMasterProcessor::resmooth (double frac)
     resultsChanged = true;
 }
 
-bool MatchMasterProcessor::hasLearnedTrack() const
+bool MacAndCheeseProcessor::hasLearnedTrack() const
 {
     const juce::ScopedLock sl (dataLock);
     return track != nullptr;
 }
 
-double MatchMasterProcessor::getCaptureSeconds() const noexcept { return capturePos.load() / juce::jmax (1.0, captureRate); }
-double MatchMasterProcessor::getMaxCaptureSeconds() const noexcept { return maxCaptureSamples / juce::jmax (1.0, hostRate); }
+double MacAndCheeseProcessor::getCaptureSeconds() const noexcept { return capturePos.load() / juce::jmax (1.0, captureRate); }
+double MacAndCheeseProcessor::getMaxCaptureSeconds() const noexcept { return maxCaptureSamples / juce::jmax (1.0, hostRate); }
 
-void MatchMasterProcessor::setMessage (const juce::String& m, bool isError)
+void MacAndCheeseProcessor::setMessage (const juce::String& m, bool isError)
 {
     const juce::ScopedLock sl (dataLock);
     message = m;
     messageIsError = isError;
 }
 
-MatchMasterProcessor::Snapshot MatchMasterProcessor::getSnapshot() const
+MacAndCheeseProcessor::Snapshot MacAndCheeseProcessor::getSnapshot() const
 {
     const int active = getActiveSlot();
     const juce::ScopedLock sl (dataLock);
@@ -581,7 +581,7 @@ MatchMasterProcessor::Snapshot MatchMasterProcessor::getSnapshot() const
 
 // ------------------------------------------------------------------ message-thread housekeeping
 
-void MatchMasterProcessor::timerCallback()
+void MacAndCheeseProcessor::timerCallback()
 {
     if (learnState == LearnState::listening && ! capturing.load())
         stopLearning(); // capture buffer filled up
@@ -590,7 +590,7 @@ void MatchMasterProcessor::timerCallback()
 
     const int active = getActiveSlot();
     if (resultsChanged.exchange (false) || active != shownSlot)
-        applyActiveSlot (true);
+        applyActiveSlot();
 
     const int mode = pEqMode->load() > 0.5f ? 1 : 0;
     if (mode != latencyMode)
@@ -603,7 +603,7 @@ void MatchMasterProcessor::timerCallback()
         updateHeadroom();
 }
 
-void MatchMasterProcessor::updateHeadroom()
+void MacAndCheeseProcessor::updateHeadroom()
 {
     std::shared_ptr<mm::MatchResult> src;
     std::shared_ptr<mm::TargetProfile> t;
@@ -661,7 +661,7 @@ void MatchMasterProcessor::updateHeadroom()
     });
 }
 
-void MatchMasterProcessor::applyActiveSlot (bool forceFirs)
+void MacAndCheeseProcessor::applyActiveSlot()
 {
     const int active = getActiveSlot();
     if (active != shownSlot)
@@ -685,11 +685,10 @@ void MatchMasterProcessor::applyActiveSlot (bool forceFirs)
         activeEqPeakDb = (float) src->eqPeakDb;
     }
     activeMatched = src != nullptr;
-    if (forceFirs)
-        forceRebuild = true;
+    forceRebuild = true;
 }
 
-void MatchMasterProcessor::builderTick()
+void MacAndCheeseProcessor::builderTick()
 {
     // EQ smoothing knob -> re-smooth the stored matching curves in the background
     const double frac = currentFrac();
@@ -710,7 +709,7 @@ void MatchMasterProcessor::builderTick()
         buildAndOffer (false);
 }
 
-void MatchMasterProcessor::buildAndOffer (bool immediate)
+void MacAndCheeseProcessor::buildAndOffer (bool immediate)
 {
     std::shared_ptr<mm::MatchResult> src;
     {
@@ -782,7 +781,7 @@ namespace
     constexpr int stateVersion = 1;
 }
 
-void MatchMasterProcessor::getStateInformation (juce::MemoryBlock& dest)
+void MacAndCheeseProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     juce::ValueTree root (idState);
     root.setProperty ("version", stateVersion, nullptr);
@@ -834,7 +833,7 @@ void MatchMasterProcessor::getStateInformation (juce::MemoryBlock& dest)
     gz.flush();
 }
 
-void MatchMasterProcessor::setStateInformation (const void* data, int size)
+void MacAndCheeseProcessor::setStateInformation (const void* data, int size)
 {
     // v2.0 projects: parameters only, as XML
     if (auto xml = getXmlFromBinary (data, size))
@@ -914,6 +913,6 @@ void MatchMasterProcessor::setStateInformation (const void* data, int size)
     resultsChanged = true;
 }
 
-juce::AudioProcessorEditor* MatchMasterProcessor::createEditor() { return new MatchMasterEditor (*this); }
+juce::AudioProcessorEditor* MacAndCheeseProcessor::createEditor() { return new MacAndCheeseEditor (*this); }
 
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new MatchMasterProcessor(); }
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new MacAndCheeseProcessor(); }

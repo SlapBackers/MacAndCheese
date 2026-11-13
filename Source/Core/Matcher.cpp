@@ -1,5 +1,5 @@
 /*
-    MatchMaster - C++ port of the Matchering algorithm (GPLv3).
+    Mac and Cheese - C++ port of the Matchering algorithm (GPLv3).
     Each function names the Matchering source it mirrors.
 */
 #include "Matcher.h"
@@ -450,7 +450,7 @@ MatchResult match (const TargetProfile& tgt, const ReferenceProfile& ref, const 
     res.rmsCoefficient = ref.matchRms / std::max ((double) cfg.minValue, tgt.matchRms);
 
     // stages.__match_frequencies -> get_fir (target loudest pieces were amplified first).
-    // MatchMaster addition: the side denominator is floored at -30 dB below the mid, so near-mono
+    // Mac and Cheese addition: the side denominator is floored at -30 dB below the mid, so near-mono
     // content in the track isn't boosted enormously (the cause of a "weird" stereo image).
     auto matchingFor = [&] (const std::vector<double>& t, const std::vector<double>& r, const std::vector<double>* floorRef)
     {

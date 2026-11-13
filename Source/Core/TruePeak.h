@@ -1,5 +1,5 @@
 /*
-    MatchMaster - true-peak detector (4x oversampled, ITU-R BS.1770 style).
+    Mac and Cheese - true-peak detector (4x oversampled, ITU-R BS.1770 style).
     Estimates the analogue peak between samples. Output is delayed by getDelaySamples().
 */
 #pragma once

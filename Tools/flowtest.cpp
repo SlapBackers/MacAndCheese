@@ -31,7 +31,7 @@ juce::AudioBuffer<float> makeSong (double rate, double seconds, float tilt, floa
     return b;
 }
 
-void playThrough (MatchMasterProcessor& p, const juce::AudioBuffer<float>& in, juce::AudioBuffer<float>* out)
+void playThrough (MacAndCheeseProcessor& p, const juce::AudioBuffer<float>& in, juce::AudioBuffer<float>* out)
 {
     juce::MidiBuffer midi;
     juce::AudioBuffer<float> block (2, 512);
@@ -57,7 +57,7 @@ double rmsDb (const juce::AudioBuffer<float>& b, int start, int len)
 // and records a brightness indicator (HF / total energy, dB) per block.
 struct RealtimeRunner : juce::Thread
 {
-    RealtimeRunner (MatchMasterProcessor& p, const juce::AudioBuffer<float>& t, double r)
+    RealtimeRunner (MacAndCheeseProcessor& p, const juce::AudioBuffer<float>& t, double r)
         : juce::Thread ("rt-audio"), proc (p), track (t), rate (r) {}
 
     void run() override
@@ -97,7 +97,7 @@ struct RealtimeRunner : juce::Thread
             if (times[i] >= fromMs && times[i] < toMs) { acc += values[i]; ++n; }
         return n > 0 ? acc / n : 0.0;
     }
-    MatchMasterProcessor& proc;
+    MacAndCheeseProcessor& proc;
     const juce::AudioBuffer<float>& track;
     double rate;
     juce::CriticalSection lock;
@@ -120,7 +120,8 @@ int loadVst3 (const juce::String& path)
     juce::OwnedArray<juce::PluginDescription> found;
     fmt.findAllTypesForFile (found, path);
     if (found.isEmpty()) { std::cout << "  FAIL  no VST3 plugin found in " << path << "\n"; return 1; }
-    std::cout << "  PASS  found VST3: " << found[0]->name << " by " << found[0]->manufacturerName << " (" << found[0]->category << ")\n";
+    std::cout << "  PASS  found VST3: " << found[0]->name << " by " << found[0]->manufacturerName << " (" << found[0]->category << "), uid "
+              << juce::String::toHexString (found[0]->uniqueId) << "\n";
     juce::String err;
     auto inst = fmt.createInstanceFromDescription (*found[0], 48000, 512, err);
     if (inst == nullptr) { std::cout << "  FAIL  could not instantiate: " << err << "\n"; return 1; }
@@ -144,9 +145,9 @@ int main (int argc, char* argv[])
     int failures = 0;
     auto check = [&] (bool ok, const juce::String& what) { std::cout << (ok ? "  PASS  " : "  FAIL  ") << what << "\n"; if (! ok) ++failures; };
 
-    using LS = MatchMasterProcessor::LearnState;
+    using LS = MacAndCheeseProcessor::LearnState;
     const double rate = 48000;
-    auto proc = std::make_unique<MatchMasterProcessor>();
+    auto proc = std::make_unique<MacAndCheeseProcessor>();
     proc->setPlayConfigDetails (2, 2, rate, 512);
     proc->prepareToPlay (rate, 512);
     auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
@@ -370,7 +371,7 @@ int main (int argc, char* argv[])
         juce::MemoryBlock state;
         proc->getStateInformation (state);
         std::cout << "  info  project state size " << (int) (state.getSize() / 1024) << " KB\n";
-        auto proc2 = std::make_unique<MatchMasterProcessor>();
+        auto proc2 = std::make_unique<MacAndCheeseProcessor>();
         proc2->setPlayConfigDetails (2, 2, rate, 512);
         proc2->setStateInformation (state.getData(), (int) state.getSize());
         proc2->prepareToPlay (rate, 512);

@@ -1,10 +1,8 @@
 /*
-    matchmaster-cli: tests the MatchMaster engine outside a DAW.
-      matchmaster-cli selftest
-      matchmaster-cli match <your-track> <reference> <output.wav>
-    Runs the same chain as the plugin: analysis -> M/S FIR EQ -> loudness -> Hyrax limiter -> reference level.
+    macandcheese-cli: tests the Mac and Cheese engine outside a DAW.
+      selftest: checks the matching maths (FIR, LOWESS, full offline match) against Matchering's behaviour.
 */
-#include <juce_audio_formats/juce_audio_formats.h>
+#include <juce_audio_basics/juce_audio_basics.h>
 #include "Core/Matcher.h"
 #include "Core/HyraxLimiter.h"
 #include <iostream>
@@ -173,15 +171,6 @@ int selftest()
     return failures == 0 ? 0 : 1;
 }
 
-bool readFile (juce::AudioFormatManager& fm, const juce::File& f, juce::AudioBuffer<float>& b, double& rate)
-{
-    std::unique_ptr<juce::AudioFormatReader> r (fm.createReaderFor (f));
-    if (r == nullptr) return false;
-    b.setSize ((int) r->numChannels, (int) r->lengthInSamples);
-    r->read (&b, 0, (int) r->lengthInSamples, 0, true, true);
-    rate = r->sampleRate;
-    return true;
-}
 } // namespace
 
 int main (int argc, char* argv[])
@@ -192,33 +181,12 @@ int main (int argc, char* argv[])
         if (cmd == "selftest")
             return selftest();
 
-        if (cmd == "match" && argc == 5)
-        {
-            juce::AudioFormatManager fm;
-            fm.registerBasicFormats();
-            juce::AudioBuffer<float> track, ref;
-            double tr = 0, rr = 0;
-            const auto cwd = juce::File::getCurrentWorkingDirectory();
-            if (! readFile (fm, cwd.getChildFile (argv[2]), track, tr)) { std::cerr << "can't read track\n"; return 1; }
-            if (! readFile (fm, cwd.getChildFile (argv[3]), ref, rr)) { std::cerr << "can't read reference\n"; return 1; }
-            mm::ReferenceProfile rp;
-            auto res = analyse (track, tr, ref, rr, rp);
-            auto out = processChain (track, tr, res);
-            auto outFile = cwd.getChildFile (argv[4]);
-            outFile.deleteFile();
-            juce::WavAudioFormat wav;
-            std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (new juce::FileOutputStream (outFile), tr, 2, 24, {}, 0));
-            w->writeFromAudioSampleBuffer (out, 0, out.getNumSamples());
-            std::cout << "wrote " << outFile.getFullPathName() << "  (loudness " << juce::Decibels::gainToDecibels (res.totalGain())
-                      << " dB, reference level " << juce::Decibels::gainToDecibels (res.finalAmplitudeCoef) << " dB)\n";
-            return 0;
-        }
     }
     catch (const std::exception& e)
     {
         std::cerr << "error: " << e.what() << "\n";
         return 1;
     }
-    std::cout << "usage:\n  matchmaster-cli selftest\n  matchmaster-cli match <track> <reference> <output.wav>\n";
+    std::cout << "usage: selftest\n";
     return 2;
 }

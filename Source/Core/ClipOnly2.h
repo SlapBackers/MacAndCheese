@@ -1,7 +1,7 @@
 /*
-    MatchMaster - clipper before the limiter.
+    Mac and Cheese - clipper before the limiter.
     Port of ClipOnly2 by Chris Johnson / Airwindows (MIT licence, https://github.com/airwindows/airwindows).
-    The clipping code is ClipOnly2's own "prefab chunk", unchanged; MatchMaster only scales the signal
+    The clipping code is ClipOnly2's own "prefab chunk", unchanged; Mac and Cheese only scales the signal
     so the clip point lands where the Clip knob asks for it. Latency: one 44.1 kHz sample.
 */
 #pragma once

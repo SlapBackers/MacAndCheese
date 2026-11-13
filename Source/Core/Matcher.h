@@ -1,8 +1,8 @@
 /*
-    MatchMaster - reference matching mastering plugin
+    Mac and Cheese - reference matching mastering plugin
     C++ port of the Matchering algorithm (https://github.com/sergree/matchering)
     Matchering: Copyright (C) 2016-2022 Sergree, GPLv3.
-    This file is part of MatchMaster and is distributed under the GNU GPL v3.
+    This file is part of Mac and Cheese and is distributed under the GNU GPL v3.
 */
 #pragma once
 

@@ -1,5 +1,5 @@
 /*
-    MatchMaster - semi-real-time Matchering as a VST3 (GPLv3).
+    Mac and Cheese - semi-real-time Matchering as a VST3 (GPLv3).
     Flow: load up to 3 references (A/B/C) -> Learn (listen to the live track once) -> switch profiles live.
 */
 #pragma once
@@ -13,14 +13,14 @@
 #include "Core/PartitionedConvolver.h"
 #include "Core/ClipOnly2.h"
 
-class MatchMasterProcessor : public juce::AudioProcessor, private juce::Timer
+class MacAndCheeseProcessor : public juce::AudioProcessor, private juce::Timer
 {
 public:
     static constexpr int numSlots = 3;
     enum class LearnState { idle, listening, analysing };
 
-    MatchMasterProcessor();
-    ~MatchMasterProcessor() override;
+    MacAndCheeseProcessor();
+    ~MacAndCheeseProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -30,7 +30,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "MatchMaster"; }
+    const juce::String getName() const override { return "Mac and Cheese"; }
     bool acceptsMidi() const override { return false; }
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
@@ -95,7 +95,7 @@ private:
     void timerCallback() override;
     void matchSlots (std::vector<int> which); // worker thread
     void resmooth (double frac);              // worker thread
-    void applyActiveSlot (bool forceFirs);    // message thread
+    void applyActiveSlot();                   // message thread
     void builderTick();                       // FIR builder thread: follows the knobs, independent of the GUI
     void updateLatency();
     void setMessage (const juce::String&, bool isError);
@@ -139,9 +139,9 @@ private:
 
     struct BuilderThread : juce::Thread
     {
-        explicit BuilderThread (MatchMasterProcessor& p) : juce::Thread ("MatchMaster FIR builder"), owner (p) {}
+        explicit BuilderThread (MacAndCheeseProcessor& p) : juce::Thread ("Mac and Cheese FIR builder"), owner (p) {}
         void run() override { while (! threadShouldExit()) { owner.builderTick(); wait (8); } }
-        MatchMasterProcessor& owner;
+        MacAndCheeseProcessor& owner;
     };
     BuilderThread builder { *this };
     juce::CriticalSection builderLock;  // FIR design + engine (re)configuration
@@ -183,5 +183,5 @@ private:
     std::atomic<float>* pLevelMatch = nullptr;
     std::atomic<float>* pProfile = nullptr;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MatchMasterProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MacAndCheeseProcessor)
 };

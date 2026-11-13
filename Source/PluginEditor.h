@@ -51,7 +51,7 @@ namespace ui
     {
     public:
         std::function<void()> onClick;
-        MatchMasterProcessor::LearnState state = MatchMasterProcessor::LearnState::idle;
+        MacAndCheeseProcessor::LearnState state = MacAndCheeseProcessor::LearnState::idle;
         bool learned = false, enough = false;
         float deviation = -1.0f; // learn quality: spectrum change between checks, dB
         double seconds = 0, maxSeconds = 1;
@@ -68,7 +68,7 @@ namespace ui
     class CurveView : public juce::Component
     {
     public:
-        MatchMasterProcessor::Snapshot snap;
+        MacAndCheeseProcessor::Snapshot snap;
         float midAmt = 1, sideAmt = 1, maxCorr = 24;
         void paint (juce::Graphics&) override;
     };
@@ -81,11 +81,11 @@ namespace ui
     };
 }
 
-class MatchMasterEditor : public juce::AudioProcessorEditor, private juce::Timer
+class MacAndCheeseEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
-    explicit MatchMasterEditor (MatchMasterProcessor&);
-    ~MatchMasterEditor() override;
+    explicit MacAndCheeseEditor (MacAndCheeseProcessor&);
+    ~MacAndCheeseEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -94,10 +94,10 @@ private:
     void timerCallback() override;
     void setAdvanced (bool);
 
-    MatchMasterProcessor& proc;
+    MacAndCheeseProcessor& proc;
     ui::LookAndFeel lnf;
 
-    std::array<ui::DropZone, MatchMasterProcessor::numSlots> slotZones;
+    std::array<ui::DropZone, MacAndCheeseProcessor::numSlots> slotZones;
     ui::LearnButton learnButton;
     juce::Label messageLabel;
     juce::Slider matchKnob;
@@ -125,5 +125,5 @@ private:
     bool advanced = false;
     static constexpr int simpleHeight = 494, advancedHeight = 850, width = 700;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MatchMasterEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MacAndCheeseEditor)
 };

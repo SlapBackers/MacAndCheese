@@ -1,8 +1,8 @@
-# MatchMaster roadmap
+# Mac and Cheese roadmap
 
-MatchMaster is built in public. This is where it's going and why. Releases and their notes are on the [Releases page](https://github.com/SlapBackers/MatchMaster/releases); details of what shipped are in the [CHANGELOG](CHANGELOG.md).
+Mac and Cheese is built in public. This is where it's going and why. Releases and their notes are on the [Releases page](https://github.com/SlapBackers/MacAndCheese/releases); details of what shipped are in the [CHANGELOG](CHANGELOG.md).
 
-**The idea:** pick a well-mastered reference song, let MatchMaster listen to your track once, and get a live, non-destructive master that sounds like the reference. Everything is driven by references, and nothing is a black box.
+**The idea:** pick a well-mastered reference song, let Mac and Cheese listen to your track once, and get a live, non-destructive master that sounds like the reference. Everything is driven by references, and nothing is a black box.
 
 **The chain it is growing into:**
 
