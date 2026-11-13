@@ -53,6 +53,57 @@ double rmsDb (const juce::AudioBuffer<float>& b, int start, int len)
     return 10 * std::log10 (acc / (2.0 * len) + 1e-30);
 }
 
+// Plays a track through the plugin on its own thread, paced in real time like a DAW audio thread,
+// and records a brightness indicator (HF / total energy, dB) per block.
+struct RealtimeRunner : juce::Thread
+{
+    RealtimeRunner (MatchMasterProcessor& p, const juce::AudioBuffer<float>& t, double r)
+        : juce::Thread ("rt-audio"), proc (p), track (t), rate (r) {}
+
+    void run() override
+    {
+        juce::AudioBuffer<float> block (2, 512);
+        juce::MidiBuffer midi;
+        int pos = 0;
+        const double blockMs = 512.0 * 1000.0 / rate;
+        auto next = juce::Time::getMillisecondCounterHiRes();
+        while (! threadShouldExit())
+        {
+            if (pos + 512 > track.getNumSamples()) pos = 0;
+            for (int ch = 0; ch < 2; ++ch) block.copyFrom (ch, 0, track, ch, pos, 512);
+            pos += 512;
+            proc.processBlock (block, midi);
+            double hf = 0, all = 0;
+            for (int i = 1; i < 512; ++i)
+            {
+                const float x = block.getSample (0, i), d = x - block.getSample (0, i - 1);
+                hf += d * d; all += x * x;
+            }
+            {
+                const juce::ScopedLock sl (lock);
+                times.push_back (juce::Time::getMillisecondCounterHiRes());
+                values.push_back (10 * std::log10 ((hf + 1e-20) / (all + 1e-20)));
+            }
+            next += blockMs;
+            const auto wait = next - juce::Time::getMillisecondCounterHiRes();
+            if (wait > 0) juce::Thread::sleep ((int) wait);
+        }
+    }
+    double average (double fromMs, double toMs)
+    {
+        const juce::ScopedLock sl (lock);
+        double acc = 0; int n = 0;
+        for (size_t i = 0; i < times.size(); ++i)
+            if (times[i] >= fromMs && times[i] < toMs) { acc += values[i]; ++n; }
+        return n > 0 ? acc / n : 0.0;
+    }
+    MatchMasterProcessor& proc;
+    const juce::AudioBuffer<float>& track;
+    double rate;
+    juce::CriticalSection lock;
+    std::vector<double> times, values;
+};
+
 void snapshot (juce::Component& c, const juce::File& f)
 {
     auto img = c.createComponentSnapshot (c.getLocalBounds(), true, 2.0f);
@@ -121,8 +172,6 @@ int main (int argc, char* argv[])
     proc->loadReference (1, writeWav (refWarm, 44100, "warm-ref.wav"));
     auto waitSlots = [&] { for (int t = 0; t < 400; ++t) { auto s = proc->getSnapshot(); if (s.slots[0].loaded && s.slots[1].loaded && ! s.slots[0].busy && ! s.slots[1].busy) return true; pump (50); } return false; };
     check (waitSlots(), "two references analysed into A and B");
-    const auto snap0 = proc->getSnapshot();
-    std::cout << "  info  flavours: A = " << snap0.slots[0].flavour << ", B = " << snap0.slots[1].flavour << "\n";
 
     auto track = makeSong (rate, 40, 0.08f, 0.05f, 0.2f, 1);
     auto transparency = [&]
@@ -150,6 +199,50 @@ int main (int argc, char* argv[])
     check (done, "one Learn matched both profiles");
     pump (500);
 
+    // ---- knob responsiveness: sweep Mid/Side EQ 0 -> 100 % over 2 s while audio runs in real time.
+    //      Pass 1: GUI thread free. Pass 2: GUI thread busy (as in hosts that block it during a mouse drag).
+    {
+        auto setEq = [&] (float v) { proc->apvts.getParameter ("midEq")->setValueNotifyingHost (v); proc->apvts.getParameter ("sideEq")->setValueNotifyingHost (v); };
+        auto now = [] { return juce::Time::getMillisecondCounterHiRes(); };
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            const bool guiBusy = pass == 1;
+            setEq (0.0f);
+            pump (600);
+            RealtimeRunner rt (*proc, track, rate);
+            rt.startThread (juce::Thread::Priority::highest);
+            pump (800);
+            const double t0 = now();
+            pump (400);
+            const double start = rt.average (t0, now());
+            const double sweep0 = now();
+            for (int step = 1; step <= 60; ++step)
+            {
+                setEq (step / 60.0f);
+                if (guiBusy) juce::Thread::sleep (33); else pump (33);
+            }
+            const double sweep1 = now();
+            if (guiBusy) juce::Thread::sleep (300); else pump (300);
+            const double endOfDrag = rt.average (sweep1, now());          // knob still "held"
+            const double halfway = rt.average (sweep0 + 900, sweep0 + 1100); // knob at ~50 %
+            pump (800);                                                    // "mouse released"
+            const double t2 = now();
+            pump (400);
+            const double final = rt.average (t2, now());
+            rt.stopThread (2000);
+            const double span = final - start;
+            const double atEnd = std::abs (span) > 1e-6 ? (endOfDrag - start) / span : 1.0;
+            const double atHalf = std::abs (span) > 1e-6 ? (halfway - start) / span : 1.0;
+            std::cout << "  info  knob sweep, GUI thread " << (guiBusy ? "busy" : "free") << ": EQ change heard "
+                      << juce::roundToInt (atHalf * 100) << "% at mid-turn, " << juce::roundToInt (atEnd * 100)
+                      << "% before release (brightness " << juce::String (start, 1) << " -> " << juce::String (final, 1) << " dB)\n";
+            check (atEnd > 0.85 && atHalf > 0.2 && atHalf < 0.97, // halfway: moving, not jumped (max correction caps early)
+                   juce::String ("sound follows the EQ knobs while turning (GUI thread ") + (guiBusy ? "busy)" : "free)"));
+        }
+        setEq (1.0f);
+        pump (600);
+    }
+
     auto measure = [&] (const juce::String& label)
     {
         playThrough (*proc, track, nullptr);
@@ -170,6 +263,27 @@ int main (int argc, char* argv[])
     auto a = measure ("profile A (bright)");
     check (std::abs (a.first - refLoud (refBright)) < 1.5, "A matches its reference loudness (" + juce::String (refLoud (refBright), 2) + " dB)");
     check (a.second <= -0.9f, "limiter holds the -1 dBTP ceiling");
+
+    // clipper before the limiter
+    auto setClip = [&] (float db) { auto* p = proc->apvts.getParameter ("clip"); p->setValueNotifyingHost (p->convertTo0to1 (db)); pump (300); };
+    proc->maxGrDb = 0.0f; proc->maxClipDb = 0.0f;
+    measure ("clip 0 dB");
+    const float grNoClip = proc->maxGrDb.load();
+    check (proc->maxClipDb.load() < 0.01f, "Clip 0 dB: clipper does nothing");
+    setClip (3.0f);
+    proc->maxGrDb = 0.0f; proc->maxClipDb = 0.0f;
+    auto clipped = measure ("clip 3 dB");
+    const float grClip = proc->maxGrDb.load(), shaved = proc->maxClipDb.load();
+    std::cout << "  info  limiter max GR " << grNoClip << " dB -> " << grClip << " dB with Clip 3 dB; clipper shaved max " << shaved << " dB\n";
+    check (shaved > 2.0f && shaved < 4.5f && grNoClip - grClip > 1.5f, "Clip 3 dB: clipper takes ~3 dB, limiter does less");
+    check (clipped.second <= -0.9f, "Clip 3 dB: true peak still under the -1 dBTP ceiling");
+    check (std::abs (clipped.first - a.first) < 1.0, "Clip 3 dB: loudness still matched");
+    proc->apvts.getParameter ("limiter")->setValueNotifyingHost (0.0f);
+    pump (600);
+    auto clipNoLim = measure ("clip 3 dB, limiter off");
+    check (clipNoLim.second <= -0.7f, "Clip 3 dB, limiter off: output stays under the ceiling");
+    proc->apvts.getParameter ("limiter")->setValueNotifyingHost (1.0f);
+    setClip (0.0f);
     proc->selectSlot (1);
     pump (400);
     auto b = measure ("profile B (warm)");
@@ -211,6 +325,38 @@ int main (int argc, char* argv[])
             btn->triggerClick();
     pump (300);
     snapshot (*editor, outDir.getChildFile ("4-advanced.png"));
+
+    // save with the project -> reopen in a fresh instance: same sound without Learn
+    {
+        juce::MemoryBlock state;
+        proc->getStateInformation (state);
+        std::cout << "  info  project state size " << (int) (state.getSize() / 1024) << " KB\n";
+        auto proc2 = std::make_unique<MatchMasterProcessor>();
+        proc2->setPlayConfigDetails (2, 2, rate, 512);
+        proc2->setStateInformation (state.getData(), (int) state.getSize());
+        proc2->prepareToPlay (rate, 512);
+        pump (1500);
+        const auto s2 = proc2->getSnapshot();
+        check (s2.slots[0].matched && s2.slots[1].matched && s2.slots[0].name == "bright-ref" && proc2->getActiveSlot() == 0,
+               "reopened project: references, names and matches restored");
+        check (! proc2->hasLearnedTrack(), "reopened project: learned audio is not stored (known limit)");
+        std::cout << "  info  message after reopen: " << s2.message << "\n";
+        juce::AudioBuffer<float> o1 (2, track.getNumSamples()), o2 (2, track.getNumSamples());
+        playThrough (*proc, track, nullptr);
+        playThrough (*proc, track, &o1);
+        playThrough (*proc2, track, nullptr);
+        playThrough (*proc2, track, &o2);
+        double maxDiff = 0, maxOut = 0;
+        for (int ch = 0; ch < 2; ++ch)
+            for (int i = 0; i < track.getNumSamples(); ++i)
+            {
+                maxDiff = std::max (maxDiff, (double) std::abs (o1.getSample (ch, i) - o2.getSample (ch, i)));
+                maxOut = std::max (maxOut, (double) std::abs (o1.getSample (ch, i)));
+            }
+        std::cout << "  info  max difference original vs reopened: " << juce::String (juce::Decibels::gainToDecibels (maxDiff / maxOut, -200.0), 1) << " dB below peak\n";
+        check (maxDiff < maxOut * 1e-3, "reopened project sounds the same as before saving");
+        proc2.reset();
+    }
 
     editor.reset();
     proc.reset();

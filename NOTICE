@@ -13,4 +13,8 @@ The following parts are direct ports of Matchering's code and keep its behaviour
   Source/Core/HyraxLimiter.h  (the "Hyrax" limiter, adapted to real time)
 MatchMaster is not affiliated with or endorsed by the Matchering project.
 
+The clipper (Source/Core/ClipOnly2.h) is a port of ClipOnly2 by Chris Johnson / Airwindows:
+  https://github.com/airwindows/airwindows
+  Copyright (c) Airwindows, licensed under the MIT licence.
+
 Built with JUCE (https://juce.com), used under the AGPLv3.

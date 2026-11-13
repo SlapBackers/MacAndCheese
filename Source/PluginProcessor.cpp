@@ -8,6 +8,8 @@ namespace
     constexpr double minCaptureSeconds = 5.0;
     constexpr double maxReferenceSeconds = 15.0 * 60.0; // Matchering's max_length
     const juce::StringArray slotNames { "A", "B", "C" };
+    constexpr float clipOffDb = 24.0f;    // clip point far above any signal: clipper is a pure delay
+    constexpr float clipSoftStart = 0.9549925859f; // ClipOnly2 starts softening here (-0.2 dB)
 }
 
 MatchMasterProcessor::MatchMasterProcessor()
@@ -27,15 +29,18 @@ MatchMasterProcessor::MatchMasterProcessor()
     pLimiter = apvts.getRawParameterValue ("limiter");
     pTruePeak = apvts.getRawParameterValue ("truePeak");
     pCeiling = apvts.getRawParameterValue ("ceiling");
+    pClip = apvts.getRawParameterValue ("clip");
     pProfile = apvts.getRawParameterValue ("profile");
     for (auto& b : slotBusy)
         b = false;
     startTimerHz (30);
+    builder.startThread (juce::Thread::Priority::high);
 }
 
 MatchMasterProcessor::~MatchMasterProcessor()
 {
     stopTimer();
+    builder.stopThread (4000);
     pool.removeAllJobs (true, 10000);
 }
 
@@ -61,6 +66,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MatchMasterProcessor::create
     l.add (std::make_unique<Ch> (juce::ParameterID { "eqMode", 1 }, "EQ Mode", juce::StringArray { "Linear", "Natural" }, 0));
     // loudness + limiter
     l.add (std::make_unique<F> (juce::ParameterID { "loudness", 1 }, "Loudness", percent, 100.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "clip", 1 }, "Clip", juce::NormalisableRange<float> (0.0f, 6.0f, 0.1f), 0.0f, db));
     l.add (std::make_unique<B> (juce::ParameterID { "limiter", 1 }, "Limiter", true));
     l.add (std::make_unique<B> (juce::ParameterID { "truePeak", 1 }, "True Peak", true));
     l.add (std::make_unique<F> (juce::ParameterID { "ceiling", 1 }, "Ceiling", juce::NormalisableRange<float> (-6.0f, 0.0f, 0.1f), -1.0f, db));
@@ -81,26 +87,33 @@ void MatchMasterProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     maxBlock = juce::jmax (1, samplesPerBlock);
     firSize = mm::firSizeForRate (sampleRate);
 
-    const juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) maxBlock, 1 };
-    midConv.prepare (spec);
-    sideConv.prepare (spec);
     midBuf.setSize (1, maxBlock);
     sideBuf.setSize (1, maxBlock);
 
     limiter.prepare (sampleRate, 2);
+    clipper.prepare (sampleRate);
+    clipThresholdDb.reset (sampleRate, 0.05);
+    clipThresholdDb.setCurrentAndTargetValue (clipOffDb);
+    clipGainCache = -1.0f;
     loudGain.reset (sampleRate, 0.05);
     finalGain.reset (sampleRate, 0.05);
     loudGain.setCurrentAndTargetValue (1.0f);
     finalGain.setCurrentAndTargetValue (1.0f);
 
-    builtMode = -1;
-    rebuildFirs (true);
+    {
+        const juce::ScopedLock sl (builderLock);
+        midConv.prepare (convBlock, firSize);
+        sideConv.prepare (convBlock, firSize);
+        enginePrepared = true;
+        buildAndOffer (true);
+    }
+    updateLatency();
 }
 
 void MatchMasterProcessor::updateLatency()
 {
     const bool natural = pEqMode->load() > 0.5f;
-    setLatencySamples ((natural ? 0 : firSize / 2) + limiter.getLatencySamples());
+    setLatencySamples ((natural ? 0 : firSize / 2) + convBlock + clipper.getLatencySamples() + limiter.getLatencySamples());
 }
 
 void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -135,25 +148,38 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     limiter.setCeiling (juce::Decibels::decibelsToGain (ceilingDb));
     limiter.setTruePeak (pTruePeak->load() > 0.5f);
 
+    // Clip knob = dB the clipper shaves off the loudest peaks before the limiter (scaled by Match).
+    const float clipDb = matched ? pClip->load() * match : 0.0f;
+    const bool clipOn = clipDb > 0.01f;
+    const float eqAmt = match * pMidEq->load() * 0.01f;
+    const float estPeakDb = activeTrackPeakDb.load() + (activeEqPeakDb.load() - activeTrackPeakDb.load()) * eqAmt; // EQ'd track, unity gain
+
     float preDb = activeGainDb.load() * match * loud;
     float postDb = activeRefDb.load() * match;
+    float clipPointDb = clipOffDb;
     if (! limOn)
     {
-        // no limiter: keep the output under the ceiling, report what's missing
+        // no limiter: keep the output under the ceiling, report what's missing.
+        // With the clipper on, it clips 1 dB under the ceiling (room for its inter-sample overs).
         const float targetDb = preDb + postDb;
-        const float eqAmt = match * pMidEq->load() * 0.01f;
-        const float peakDb = exactPeakValid.load()
-                                 ? exactPeakDb.load()
-                                 : activeTrackPeakDb.load() + (activeEqPeakDb.load() - activeTrackPeakDb.load()) * eqAmt + 2.0f; // estimate + margin until measured
-        const float applied = matched ? juce::jmin (targetDb, ceilingDb - peakDb) : 0.0f;
+        const float peakDb = exactPeakValid.load() ? exactPeakDb.load() : estPeakDb + 2.0f; // estimate + margin until measured
+        const float topDb = clipOn ? ceilingDb - 1.0f : ceilingDb;
+        const float applied = matched ? juce::jmin (targetDb, topDb - peakDb + clipDb) : 0.0f;
         suggestionDb.store (matched ? juce::jmax (0.0f, targetDb - applied) : 0.0f);
         preDb = applied;
         postDb = 0.0f;
+        if (clipOn)
+            clipPointDb = topDb;
     }
     else
+    {
         suggestionDb.store (0.0f);
+        if (clipOn) // clip the top clipDb of the peaks, never below the limiter's ceiling
+            clipPointDb = juce::jmax (ceilingDb, estPeakDb + preDb - clipDb);
+    }
     loudGain.setTargetValue (juce::Decibels::decibelsToGain (preDb));
     finalGain.setTargetValue (juce::Decibels::decibelsToGain (postDb));
+    clipThresholdDb.setTargetValue (clipPointDb);
 
     float peakL = 0.0f, peakR = 0.0f;
     for (int off = 0; off < total; off += maxBlock)
@@ -171,18 +197,26 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             s[i] = m[i] - ri;
         }
 
-        juce::dsp::AudioBlock<float> mb (midBuf), sb (sideBuf);
-        auto mSub = mb.getSubBlock (0, (size_t) n);
-        auto sSub = sb.getSubBlock (0, (size_t) n);
-        midConv.process (juce::dsp::ProcessContextReplacing<float> (mSub));
-        sideConv.process (juce::dsp::ProcessContextReplacing<float> (sSub));
+        midConv.process (m, n);
+        sideConv.process (s, n);
 
-        for (int i = 0; i < n; ++i) // dsp.ms_to_lr + loudness
+        for (int i = 0; i < n; ++i) // dsp.ms_to_lr + loudness + clipper
         {
             const float g = loudGain.getNextValue();
-            l[i] = (m[i] + s[i]) * g;
+            if (clipThresholdDb.isSmoothing() || clipGainCache < 0.0f)
+            {
+                clipGainCache = juce::Decibels::decibelsToGain (clipThresholdDb.getNextValue());
+                clipInvCache = 1.0f / clipGainCache;
+            }
+            const float xl = (m[i] + s[i]) * g * clipInvCache;
+            clipOver = juce::jmax (clipOver, std::abs (xl));
+            l[i] = clipper.process (0, xl) * clipGainCache;
             if (r != nullptr)
-                r[i] = (m[i] - s[i]) * g;
+            {
+                const float xr = (m[i] - s[i]) * g * clipInvCache;
+                clipOver = juce::jmax (clipOver, std::abs (xr));
+                r[i] = clipper.process (1, xr) * clipGainCache;
+            }
         }
 
         float* chans[2] = { l, r };
@@ -202,6 +236,10 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     meterL.store (juce::jmax (peakL, meterL.load() * 0.92f));
     meterR.store (juce::jmax (numCh > 1 ? peakR : peakL, meterR.load() * 0.92f));
+    const float shaved = clipOver > clipSoftStart ? juce::Decibels::gainToDecibels (clipOver / clipSoftStart) : 0.0f;
+    clipOver = 0.0f;
+    clipDbNow.store (juce::jmax (shaved, clipDbNow.load() * 0.92f));
+    maxClipDb.store (juce::jmax (maxClipDb.load(), shaved));
     const float g = limiter.popMinGain();
     meterGr.store (juce::jmin (meterGr.load(), g));
     maxGrDb.store (juce::jmax (maxGrDb.load(), -juce::Decibels::gainToDecibels (g, -60.0f)));
@@ -249,7 +287,6 @@ void MatchMasterProcessor::loadReference (int slot, const juce::File& file)
                 s.ref = ref;
                 s.result = nullptr;
                 s.name = file.getFileNameWithoutExtension();
-                s.flavour = mm::describeReference (*ref, config);
             }
             resultsChanged = true;
             matchSlots ({ slot });
@@ -262,13 +299,6 @@ void MatchMasterProcessor::loadReference (int slot, const juce::File& file)
     });
 
     selectSlot (slot);
-}
-
-void MatchMasterProcessor::setFlavour (int slot, const juce::String& word)
-{
-    const juce::ScopedLock sl (dataLock);
-    if (slot >= 0 && slot < numSlots)
-        slots[(size_t) slot].flavour = word.trim();
 }
 
 void MatchMasterProcessor::selectSlot (int slot)
@@ -422,7 +452,6 @@ MatchMasterProcessor::Snapshot MatchMasterProcessor::getSnapshot() const
         info.busy = slotBusy[(size_t) i];
         info.matched = slot.result != nullptr;
         info.name = slot.name;
-        info.flavour = slot.flavour;
         anyRef |= info.loaded || info.busy;
     }
     if (const auto& r = slots[(size_t) active].result)
@@ -444,6 +473,8 @@ MatchMasterProcessor::Snapshot MatchMasterProcessor::getSnapshot() const
         s.message = "Matching your track to the references...";
     else if (! anyRef && track == nullptr)
         s.message = "Drop up to 3 mastered songs into A, B, C - then press Learn and play your track";
+    else if (track == nullptr && restoredFromProject && s.slots[(size_t) active].matched)
+        s.message = "Restored from the project - press Learn again before loading a new reference";
     else if (track == nullptr)
         s.message = "Press Learn and play your track";
     else if (! s.slots[(size_t) active].loaded)
@@ -460,23 +491,16 @@ void MatchMasterProcessor::timerCallback()
     if (learnState == LearnState::listening && ! capturing.load())
         stopLearning(); // capture buffer filled up
 
-    // EQ smoothing knob -> re-smooth the stored matching curves in the background
-    const double frac = currentFrac();
-    if (std::abs (frac - requestedFrac) > 1e-5 && ! resmoothPending.load())
-    {
-        {
-            const juce::ScopedLock sl (dataLock);
-            requestedFrac = frac;
-        }
-        resmoothPending = true;
-        pool.addJob ([this, frac] { resmooth (frac); resmoothPending = false; });
-    }
-
     const int active = getActiveSlot();
     if (resultsChanged.exchange (false) || active != shownSlot)
         applyActiveSlot (true);
-    else
-        rebuildFirs (false);
+
+    const int mode = pEqMode->load() > 0.5f ? 1 : 0;
+    if (mode != latencyMode)
+    {
+        latencyMode = mode;
+        updateLatency();
+    }
 
     if (pLimiter->load() < 0.5f)
         updateHeadroom();
@@ -484,11 +508,12 @@ void MatchMasterProcessor::timerCallback()
 
 void MatchMasterProcessor::updateHeadroom()
 {
-    auto src = firSource;
+    std::shared_ptr<mm::MatchResult> src;
     std::shared_ptr<mm::TargetProfile> t;
     {
         const juce::ScopedLock sl (dataLock);
         t = track;
+        src = firSource;
     }
     if (src == nullptr || t == nullptr)
         return;
@@ -538,76 +563,249 @@ void MatchMasterProcessor::applyActiveSlot (bool forceFirs)
 {
     const int active = getActiveSlot();
     if (active != shownSlot)
+    {
         maxGrDb = 0.0f;
+        maxClipDb = 0.0f;
+    }
     shownSlot = active;
+    std::shared_ptr<mm::MatchResult> src;
     {
         const juce::ScopedLock sl (dataLock);
         firSource = slots[(size_t) active].result;
+        src = firSource;
     }
-    if (firSource != nullptr)
+    if (src != nullptr)
     {
-        activeGainDb = (float) juce::Decibels::gainToDecibels (firSource->totalGain(), -100.0);
-        activeRefDb = (float) juce::Decibels::gainToDecibels (firSource->finalAmplitudeCoef, -100.0);
-        activeTrackPeakDb = (float) firSource->trackPeakDb;
-        activeEqPeakDb = (float) firSource->eqPeakDb;
+        activeGainDb = (float) juce::Decibels::gainToDecibels (src->totalGain(), -100.0);
+        activeRefDb = (float) juce::Decibels::gainToDecibels (src->finalAmplitudeCoef, -100.0);
+        activeTrackPeakDb = (float) src->trackPeakDb;
+        activeEqPeakDb = (float) src->eqPeakDb;
     }
-    activeMatched = firSource != nullptr;
-    rebuildFirs (forceFirs);
+    activeMatched = src != nullptr;
+    if (forceFirs)
+        forceRebuild = true;
 }
 
-void MatchMasterProcessor::rebuildFirs (bool force)
+void MatchMasterProcessor::builderTick()
 {
+    // EQ smoothing knob -> re-smooth the stored matching curves in the background
+    const double frac = currentFrac();
+    if (std::abs (frac - requestedFrac) > 1e-5 && ! resmoothPending.load())
+    {
+        {
+            const juce::ScopedLock sl (dataLock);
+            requestedFrac = frac;
+        }
+        resmoothPending = true;
+        pool.addJob ([this, frac] { resmooth (frac); resmoothPending = false; });
+    }
+
+    const juce::ScopedLock sl (builderLock);
+    midConv.collectGarbage();
+    sideConv.collectGarbage();
+    if (enginePrepared)
+        buildAndOffer (false);
+}
+
+void MatchMasterProcessor::buildAndOffer (bool immediate)
+{
+    std::shared_ptr<mm::MatchResult> src;
+    {
+        const juce::ScopedLock sl (dataLock);
+        src = firSource;
+    }
     const float match = pMatch->load() * 0.01f;
-    const float midAmt = firSource != nullptr ? match * pMidEq->load() * 0.01f : 0.0f;
-    const float sideAmt = firSource != nullptr ? match * pSideEq->load() * 0.01f : 0.0f;
+    const float midAmt = src != nullptr ? match * pMidEq->load() * 0.01f : 0.0f;
+    const float sideAmt = src != nullptr ? match * pSideEq->load() * 0.01f : 0.0f;
     const float maxCorr = pMaxCorr->load();
     const int mode = pEqMode->load() > 0.5f ? 1 : 0;
 
-    const bool modeChanged = mode != builtMode;
-    const bool common = force || modeChanged || std::abs (maxCorr - builtMaxCorr) > 0.05f;
-    if (modeChanged)
-        updateLatency();
+    const bool force = immediate || forceRebuild.exchange (false) || src != builtSource;
+    const bool common = force || mode != builtMode || std::abs (maxCorr - builtMaxCorr) > 0.05f;
 
-    auto load = [this, maxCorr, mode] (juce::dsp::Convolution& conv, const std::vector<float>* curve, float amt)
+    auto design = [&] (const std::vector<float>* curve, float amt)
     {
         static const std::vector<float> flat { 1.0f, 1.0f };
         const auto& c = curve != nullptr ? *curve : flat;
-        const double cr = firSource != nullptr ? firSource->curveSampleRate : config.sampleRate;
-        const int cf = firSource != nullptr ? firSource->curveFftSize : config.fftSize;
-        auto fir = mm::designFir (c, cr, cf, hostRate, firSize, curve != nullptr ? amt : 0.0f, maxCorr, mode == 1);
-        juce::AudioBuffer<float> ir (1, (int) fir.size());
-        ir.copyFrom (0, 0, fir.data(), (int) fir.size());
-        conv.loadImpulseResponse (std::move (ir), hostRate, juce::dsp::Convolution::Stereo::no,
-                                  juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::no);
+        const double cr = src != nullptr ? src->curveSampleRate : config.sampleRate;
+        const int cf = src != nullptr ? src->curveFftSize : config.fftSize;
+        return mm::designFir (c, cr, cf, hostRate, firSize, curve != nullptr ? amt : 0.0f, maxCorr, mode == 1);
+    };
+    auto install = [immediate] (mm::PartitionedConvolver& conv, const std::vector<float>& fir)
+    {
+        auto k = conv.makeKernel (fir);
+        if (immediate) conv.setImmediately (std::move (k));
+        else conv.offer (std::move (k));
     };
 
-    if (common || std::abs (midAmt - builtMid) > 0.004f)
+    if (common || std::abs (midAmt - builtMid) > 0.002f)
     {
-        load (midConv, firSource != nullptr ? &firSource->midCurve : nullptr, midAmt);
+        install (midConv, design (src != nullptr ? &src->midCurve : nullptr, midAmt));
         builtMid = midAmt;
     }
-    if (common || std::abs (sideAmt - builtSide) > 0.004f)
+    if (common || std::abs (sideAmt - builtSide) > 0.002f)
     {
-        load (sideConv, firSource != nullptr ? &firSource->sideCurve : nullptr, sideAmt);
+        install (sideConv, design (src != nullptr ? &src->sideCurve : nullptr, sideAmt));
         builtSide = sideAmt;
     }
     builtMaxCorr = maxCorr;
     builtMode = mode;
+    builtSource = src;
 }
 
 // ------------------------------------------------------------------ state (parameters only)
 
+namespace
+{
+    // arrays are stored as float32 blobs (plenty of precision for spectra and curves)
+    template <typename T>
+    juce::MemoryBlock toBlob (const std::vector<T>& v)
+    {
+        std::vector<float> f (v.begin(), v.end());
+        return juce::MemoryBlock (f.data(), f.size() * sizeof (float));
+    }
+    template <typename T>
+    std::vector<T> fromBlob (const juce::var& v)
+    {
+        std::vector<T> out;
+        if (auto* mb = v.getBinaryData())
+        {
+            const auto* f = static_cast<const float*> (mb->getData());
+            out.assign (f, f + mb->getSize() / sizeof (float));
+        }
+        return out;
+    }
+    const juce::Identifier idState ("MatchMasterState"), idSlot ("Slot"), idRef ("Reference"), idResult ("Result");
+    constexpr int stateVersion = 1;
+}
+
 void MatchMasterProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
-    if (auto xml = apvts.copyState().createXml())
-        copyXmlToBinary (*xml, dest);
+    juce::ValueTree root (idState);
+    root.setProperty ("version", stateVersion, nullptr);
+    root.appendChild (apvts.copyState(), nullptr);
+    {
+        const juce::ScopedLock sl (dataLock);
+        for (int i = 0; i < numSlots; ++i)
+        {
+            const auto& slot = slots[(size_t) i];
+            juce::ValueTree st (idSlot);
+            st.setProperty ("index", i, nullptr);
+            st.setProperty ("name", slot.name, nullptr);
+            if (const auto& r = slot.ref)
+            {
+                juce::ValueTree rt (idRef);
+                rt.setProperty ("midSpectrum", toBlob (r->midSpectrum), nullptr);
+                rt.setProperty ("sideSpectrum", toBlob (r->sideSpectrum), nullptr);
+                rt.setProperty ("matchRms", r->matchRms, nullptr);
+                rt.setProperty ("finalAmplitudeCoef", r->finalAmplitudeCoef, nullptr);
+                rt.setProperty ("peak", r->peak, nullptr);
+                st.appendChild (rt, nullptr);
+            }
+            if (const auto& m = slot.result)
+            {
+                juce::ValueTree mt (idResult);
+                mt.setProperty ("midCurve", toBlob (m->midCurve), nullptr);
+                mt.setProperty ("sideCurve", toBlob (m->sideCurve), nullptr);
+                mt.setProperty ("midMatching", toBlob (m->midMatching), nullptr);
+                mt.setProperty ("sideMatching", toBlob (m->sideMatching), nullptr);
+                mt.setProperty ("trackPeakDb", m->trackPeakDb, nullptr);
+                mt.setProperty ("eqPeakDb", m->eqPeakDb, nullptr);
+                mt.setProperty ("rmsCoefficient", m->rmsCoefficient, nullptr);
+                mt.setProperty ("correctionGain", m->correctionGain, nullptr);
+                mt.setProperty ("finalAmplitudeCoef", m->finalAmplitudeCoef, nullptr);
+                mt.setProperty ("curveSampleRate", m->curveSampleRate, nullptr);
+                mt.setProperty ("curveFftSize", m->curveFftSize, nullptr);
+                st.appendChild (mt, nullptr);
+            }
+            root.appendChild (st, nullptr);
+        }
+    }
+    juce::MemoryOutputStream raw;
+    root.writeToStream (raw);
+    juce::MemoryOutputStream out (dest, false);
+    out.writeInt (0x4d4d5354); // "MMST"
+    juce::GZIPCompressorOutputStream gz (out, 6);
+    gz.write (raw.getData(), raw.getDataSize());
+    gz.flush();
 }
 
 void MatchMasterProcessor::setStateInformation (const void* data, int size)
 {
+    // v2.0 projects: parameters only, as XML
     if (auto xml = getXmlFromBinary (data, size))
+    {
         if (xml->hasTagName (apvts.state.getType()))
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+        return;
+    }
+    if (size < 4)
+        return;
+    juce::MemoryInputStream in (data, (size_t) size, false);
+    if (in.readInt() != 0x4d4d5354)
+        return;
+    juce::GZIPDecompressorInputStream gz (in);
+    juce::MemoryBlock rawBlock;
+    gz.readIntoMemoryBlock (rawBlock);
+    const auto root = juce::ValueTree::readFromData (rawBlock.getData(), rawBlock.getSize());
+    if (! root.hasType (idState))
+        return;
+
+    const auto params = root.getChildWithName (apvts.state.getType());
+    if (params.isValid())
+        apvts.replaceState (params.createCopy());
+
+    std::array<Slot, numSlots> restored;
+    for (const auto& st : root)
+    {
+        if (! st.hasType (idSlot))
+            continue;
+        const int i = st.getProperty ("index", -1);
+        if (i < 0 || i >= numSlots)
+            continue;
+        auto& slot = restored[(size_t) i];
+        slot.name = st.getProperty ("name").toString();
+        const auto rt = st.getChildWithName (idRef);
+        if (rt.isValid())
+        {
+            auto r = std::make_shared<mm::ReferenceProfile>();
+            r->midSpectrum = fromBlob<double> (rt["midSpectrum"]);
+            r->sideSpectrum = fromBlob<double> (rt["sideSpectrum"]);
+            r->matchRms = rt["matchRms"];
+            r->finalAmplitudeCoef = rt["finalAmplitudeCoef"];
+            r->peak = rt["peak"];
+            if (r->isValid())
+                slot.ref = r;
+        }
+        const auto mt = st.getChildWithName (idResult);
+        if (mt.isValid() && slot.ref != nullptr)
+        {
+            auto m = std::make_shared<mm::MatchResult>();
+            m->midCurve = fromBlob<float> (mt["midCurve"]);
+            m->sideCurve = fromBlob<float> (mt["sideCurve"]);
+            m->midMatching = fromBlob<double> (mt["midMatching"]);
+            m->sideMatching = fromBlob<double> (mt["sideMatching"]);
+            m->trackPeakDb = mt["trackPeakDb"];
+            m->eqPeakDb = mt["eqPeakDb"];
+            m->rmsCoefficient = mt["rmsCoefficient"];
+            m->correctionGain = mt["correctionGain"];
+            m->finalAmplitudeCoef = mt["finalAmplitudeCoef"];
+            m->curveSampleRate = mt["curveSampleRate"];
+            m->curveFftSize = mt["curveFftSize"];
+            if (m->isValid())
+                slot.result = m;
+        }
+    }
+    {
+        const juce::ScopedLock sl (dataLock);
+        slots = restored;
+        track = nullptr;       // the learned audio itself is not stored in the project
+        restoredFromProject = true;
+        requestedFrac = currentFrac(); // stored curves are already smoothed with the saved setting
+    }
+    lastPeakKey = {};
+    exactPeakValid = false;
+    resultsChanged = true;
 }
 
 juce::AudioProcessorEditor* MatchMasterProcessor::createEditor() { return new MatchMasterEditor (*this); }

@@ -10,6 +10,8 @@
 #include <array>
 #include "Core/Matcher.h"
 #include "Core/HyraxLimiter.h"
+#include "Core/PartitionedConvolver.h"
+#include "Core/ClipOnly2.h"
 
 class MatchMasterProcessor : public juce::AudioProcessor, private juce::Timer
 {
@@ -43,7 +45,6 @@ public:
 
     // ---- GUI API (message thread)
     void loadReference (int slot, const juce::File&);
-    void setFlavour (int slot, const juce::String&);
     void selectSlot (int slot);
     int getActiveSlot() const;
     void startLearning();
@@ -56,7 +57,7 @@ public:
 
     struct SlotInfo
     {
-        juce::String name, flavour;
+        juce::String name;
         bool loaded = false, busy = false, matched = false;
     };
     struct Snapshot
@@ -72,6 +73,7 @@ public:
     Snapshot getSnapshot() const;
 
     std::atomic<float> meterL { 0.0f }, meterR { 0.0f }, meterGr { 1.0f }, maxGrDb { 0.0f };
+    std::atomic<float> clipDbNow { 0.0f }, maxClipDb { 0.0f }; // dB shaved by the clipper
     std::atomic<float> suggestionDb { 0.0f }; // limiter off: gain still needed to match loudness
 
     juce::AudioProcessorValueTreeState apvts;
@@ -81,7 +83,7 @@ private:
     {
         std::shared_ptr<mm::ReferenceProfile> ref;
         std::shared_ptr<mm::MatchResult> result;
-        juce::String name, flavour;
+        juce::String name;
     };
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
@@ -89,7 +91,7 @@ private:
     void matchSlots (std::vector<int> which); // worker thread
     void resmooth (double frac);              // worker thread
     void applyActiveSlot (bool forceFirs);    // message thread
-    void rebuildFirs (bool force);            // message thread
+    void builderTick();                       // FIR builder thread: follows the knobs, independent of the GUI
     void updateLatency();
     void setMessage (const juce::String&, bool isError);
     mm::Config configFor (double frac) const;
@@ -103,6 +105,7 @@ private:
     std::array<Slot, numSlots> slots;
     std::array<std::atomic<bool>, numSlots> slotBusy {};
     std::shared_ptr<mm::TargetProfile> track;
+    bool restoredFromProject = false; // guarded by dataLock
     juce::String message;
     bool messageIsError = false;
     std::atomic<bool> resultsChanged { false }, resmoothPending { false };
@@ -119,9 +122,25 @@ private:
     // real-time engine (active slot)
     double hostRate = 44100.0;
     int maxBlock = 512, firSize = 4096;
-    juce::dsp::Convolution midConv, sideConv;
+    static constexpr int convBlock = 128; // partition size = added latency of the EQ engine
+    mm::PartitionedConvolver midConv, sideConv;
     juce::AudioBuffer<float> midBuf, sideBuf;
+
+    struct BuilderThread : juce::Thread
+    {
+        explicit BuilderThread (MatchMasterProcessor& p) : juce::Thread ("MatchMaster FIR builder"), owner (p) {}
+        void run() override { while (! threadShouldExit()) { owner.builderTick(); wait (8); } }
+        MatchMasterProcessor& owner;
+    };
+    BuilderThread builder { *this };
+    juce::CriticalSection builderLock;  // FIR design + engine (re)configuration
+    bool enginePrepared = false;        // guarded by builderLock
+    std::atomic<bool> forceRebuild { true };
+    void buildAndOffer (bool immediate); // with builderLock held
     mm::HyraxLimiter limiter;
+    mm::ClipOnly2 clipper;
+    juce::SmoothedValue<float> clipThresholdDb; // clip point, dB full scale
+    float clipGainCache = -1.0f, clipInvCache = 1.0f, clipOver = 0.0f; // audio thread
     juce::SmoothedValue<float> loudGain, finalGain;
     std::atomic<float> activeGainDb { 0.0f }, activeRefDb { 0.0f }, activeTrackPeakDb { 0.0f }, activeEqPeakDb { 0.0f };
     std::atomic<bool> activeMatched { false };
@@ -133,7 +152,9 @@ private:
     juce::String lastPeakKey;
     float builtMid = -1.0f, builtSide = -1.0f, builtMaxCorr = -1.0f;
     int builtMode = -1;
-    std::shared_ptr<mm::MatchResult> firSource;
+    std::shared_ptr<mm::MatchResult> firSource;   // active slot's result (guarded by dataLock)
+    std::shared_ptr<mm::MatchResult> builtSource; // builder thread
+    int latencyMode = -1;
 
     std::atomic<float>* pMatch = nullptr;
     std::atomic<float>* pMidEq = nullptr;
@@ -145,6 +166,7 @@ private:
     std::atomic<float>* pLimiter = nullptr;
     std::atomic<float>* pTruePeak = nullptr;
     std::atomic<float>* pCeiling = nullptr;
+    std::atomic<float>* pClip = nullptr;
     std::atomic<float>* pProfile = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MatchMasterProcessor)

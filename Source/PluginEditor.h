@@ -22,18 +22,14 @@ namespace ui
         juce::Font getTextButtonFont (juce::TextButton&, int) override;
     };
 
-    // One reference slot (A/B/C): drop or browse a song, click to select, double-click the word to rename
+    // One reference slot (A/B/C): drop or browse a song, click to select
     class DropZone : public juce::Component, public juce::FileDragAndDropTarget
     {
     public:
-        DropZone();
         std::function<void (const juce::File&)> onFile;
         std::function<void()> onSelect;
-        std::function<void (const juce::String&)> onFlavour;
         juce::String letter, fileName;
         bool busy = false, selected = false, loaded = false;
-        void setFlavour (const juce::String&);
-        void resized() override;
         void browse();
 
         void paint (juce::Graphics&) override;
@@ -47,7 +43,6 @@ namespace ui
 
     private:
         bool dragOver = false;
-        juce::Label flavour;
         std::unique_ptr<juce::FileChooser> chooser;
     };
 
@@ -116,17 +111,17 @@ private:
 
     // limiter strip (always visible)
     juce::ToggleButton limiterButton { "Limiter" }, truePeakButton { "True peak" };
-    juce::Slider ceilingSlider;
-    juce::Label ceilingLabel, limiterReadout;
+    juce::Slider ceilingSlider, clipSlider;
+    juce::Label ceilingLabel, clipLabel, limiterReadout;
 
     using Attachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
-    std::unique_ptr<Attachment> matchAtt, midAtt, sideAtt, loudAtt, smoothAtt, corrAtt, ceilingAtt;
+    std::unique_ptr<Attachment> matchAtt, midAtt, sideAtt, loudAtt, smoothAtt, corrAtt, ceilingAtt, clipAtt;
     std::unique_ptr<ButtonAtt> limiterAtt, truePeakAtt;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;
 
     bool advanced = false;
-    static constexpr int simpleHeight = 470, advancedHeight = 800, width = 700;
+    static constexpr int simpleHeight = 494, advancedHeight = 850, width = 700;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MatchMasterEditor)
 };

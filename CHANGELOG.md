@@ -2,6 +2,14 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MatchMaster/releases).
 
+## v2.1.0 — responsive knobs, clipper, saved with your project
+
+- **Knobs respond while you turn them.** Before, the EQ only changed when you released the mouse (in some hosts not at all until then). The EQ now runs on a new engine with its own filter-building thread and click-free crossfades. Latency +128 samples (≈ 3 ms).
+- **Clip** (0–6 dB, default 0 = off): a clipper before the limiter shaves that many dB off the loudest peaks; the limiter catches the rest and the true-peak ceiling still holds. Port of Airwindows ClipOnly2 (MIT). The readout shows clip and limiter reduction separately.
+- **Saved with your DAW project**: references, file names and the learned match come back when you reopen. Known limit: the learned audio isn't stored, so loading a *new* reference after reopening needs a new Learn.
+- Removed the flavour words.
+- New `docs/GUI.md`: the spec for designing a new GUI.
+
 ## v2.0.1 — fix "damaged" plugin on macOS
 
 - Fixed: macOS said "MatchMaster.vst3 is damaged" after downloading v2.0.0, and DAWs did not list it. The plugin was re-signed too early in the build; it is now signed as the last step.

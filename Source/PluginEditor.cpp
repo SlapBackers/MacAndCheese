@@ -83,27 +83,6 @@ juce::Font LookAndFeel::getTextButtonFont (juce::TextButton&, int h)
 
 // ================================================================== DropZone (reference slot)
 
-DropZone::DropZone()
-{
-    flavour.setEditable (false, true, false);
-    flavour.setJustificationType (juce::Justification::centredLeft);
-    flavour.setFont (juce::FontOptions (13.0f, juce::Font::bold));
-    flavour.setColour (juce::Label::textColourId, colours::accent);
-    flavour.setTooltip ("Double-click to rename");
-    flavour.onTextChange = [this] { if (onFlavour) onFlavour (flavour.getText()); };
-    addAndMakeVisible (flavour);
-}
-
-void DropZone::setFlavour (const juce::String& f)
-{
-    if (! flavour.isBeingEdited() && flavour.getText() != f)
-        flavour.setText (f, juce::dontSendNotification);
-}
-
-void DropZone::resized()
-{
-    flavour.setBounds (getLocalBounds().reduced (8, 8).removeFromBottom (20));
-}
 
 void DropZone::paint (juce::Graphics& g)
 {
@@ -308,7 +287,6 @@ MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorE
         z.letter = letters[i];
         z.onFile = [this, i] (const juce::File& f) { proc.loadReference (i, f); };
         z.onSelect = [this, i] { proc.selectSlot (i); };
-        z.onFlavour = [this, i] (const juce::String& w) { proc.setFlavour (i, w); };
         addAndMakeVisible (z);
     }
 
@@ -372,6 +350,16 @@ MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorE
     ceilingSlider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
     addAndMakeVisible (ceilingSlider);
     ceilingAtt = std::make_unique<Attachment> (vts, "ceiling", ceilingSlider);
+    clipSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    clipSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 60, 20);
+    clipSlider.setColour (juce::Slider::trackColourId, colours::accent);
+    clipSlider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    clipSlider.setTooltip ("dB the clipper shaves off the loudest peaks before the limiter (0 = off)");
+    addAndMakeVisible (clipSlider);
+    clipAtt = std::make_unique<Attachment> (vts, "clip", clipSlider);
+    clipLabel.setText ("Clip", juce::dontSendNotification);
+    clipLabel.setColour (juce::Label::textColourId, colours::dim);
+    addAndMakeVisible (clipLabel);
     ceilingLabel.setText ("Ceiling", juce::dontSendNotification);
     ceilingLabel.setColour (juce::Label::textColourId, colours::dim);
     addAndMakeVisible (ceilingLabel);
@@ -421,7 +409,7 @@ void MatchMasterEditor::paint (juce::Graphics& g)
     g.drawText ("reference mastering", header.withTrimmedLeft (156), juce::Justification::centredLeft);
     g.setColour (colours::line);
     g.drawHorizontalLine (56, 0.0f, (float) getWidth());
-    g.drawHorizontalLine (simpleHeight - 64, 20.0f, (float) getWidth() - 20.0f);
+    g.drawHorizontalLine (simpleHeight - 88, 20.0f, (float) getWidth() - 20.0f);
     if (advanced)
         g.drawHorizontalLine (simpleHeight, 20.0f, (float) getWidth() - 20.0f);
 }
@@ -432,7 +420,7 @@ void MatchMasterEditor::resized()
     auto header = r.removeFromTop (56).reduced (20, 14);
     advancedButton.setBounds (header.removeFromRight (100));
 
-    auto main = r.removeFromTop (simpleHeight - 56 - 64).reduced (20, 16);
+    auto main = r.removeFromTop (simpleHeight - 56 - 88).reduced (20, 16);
     auto left = main.removeFromLeft (360);
     auto slotsRow = left.removeFromTop (130);
     const int w = (slotsRow.getWidth() - 16) / 3;
@@ -452,13 +440,16 @@ void MatchMasterEditor::resized()
     matchLabel.setBounds (knobArea.removeFromBottom (22));
     matchKnob.setBounds (knobArea);
 
-    auto strip = r.removeFromTop (64).reduced (20, 16);
-    limiterButton.setBounds (strip.removeFromLeft (90));
-    truePeakButton.setBounds (strip.removeFromLeft (100));
-    ceilingLabel.setBounds (strip.removeFromLeft (56));
-    ceilingSlider.setBounds (strip.removeFromLeft (190));
-    strip.removeFromLeft (12);
-    limiterReadout.setBounds (strip);
+    auto strip = r.removeFromTop (88).reduced (20, 12);
+    limiterReadout.setBounds (strip.removeFromBottom (24));
+    strip.removeFromBottom (4);
+    clipLabel.setBounds (strip.removeFromLeft (34));
+    clipSlider.setBounds (strip.removeFromLeft (180));
+    strip.removeFromLeft (10);
+    limiterButton.setBounds (strip.removeFromLeft (84));
+    truePeakButton.setBounds (strip.removeFromLeft (96));
+    ceilingLabel.setBounds (strip.removeFromLeft (54));
+    ceilingSlider.setBounds (strip);
 
     if (advanced)
     {
@@ -492,7 +483,6 @@ void MatchMasterEditor::timerCallback()
         z.loaded = info.loaded;
         z.busy = info.busy;
         z.selected = i == active;
-        z.setFlavour (info.loaded && ! info.busy ? info.flavour : juce::String());
         z.repaint();
     }
 
@@ -516,14 +506,16 @@ void MatchMasterEditor::timerCallback()
     const bool limOn = limiterButton.getToggleState();
     truePeakButton.setEnabled (limOn);
     juce::String lim;
+    if (clipSlider.getValue() > 0.01)
+        lim = "Clip  now " + juce::String (proc.clipDbNow.load(), 1) + " dB   max " + juce::String (proc.maxClipDb.load(), 1) + " dB     ";
     if (limOn)
-        lim = "Gain reduction  now " + juce::String (-juce::Decibels::gainToDecibels (gr, -60.0f), 1)
+        lim += "Limiter  now " + juce::String (juce::jmax (0.0f, -juce::Decibels::gainToDecibels (gr, -60.0f)), 1)
               + " dB   max " + juce::String (proc.maxGrDb.load(), 1) + " dB";
     else if (proc.suggestionDb.load() > 0.05f)
-        lim = "To match the reference: " + fmt (proc.suggestionDb.load()) + " into your limiter, ceiling "
+        lim += "To match the reference: " + fmt (proc.suggestionDb.load()) + " into your limiter, ceiling "
               + juce::String (ceilingSlider.getValue(), 1) + " dBTP";
     else
-        lim = "Limiter off - output kept under the ceiling";
+        lim += "Limiter off - output kept under the ceiling";
     limiterReadout.setText (lim, juce::dontSendNotification);
     limiterReadout.setColour (juce::Label::textColourId, limOn ? colours::dim : colours::accent);
 

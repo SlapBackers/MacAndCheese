@@ -88,8 +88,6 @@ juce::AudioBuffer<float> toStereoAtRate (const juce::AudioBuffer<float>& in, dou
 // Same-mode FFT convolution (scipy.signal.fftconvolve(..., "same")).
 std::vector<float> convolveSame (const std::vector<float>& x, const std::vector<float>& h);
 
-// One word describing a reference's character ("Bright", "Warm", "Wide", "Loud", ...).
-juce::String describeReference (const ReferenceProfile& ref, const Config& cfg);
 
 // LOWESS fraction for a smoothing amount 0..1 (0 = Matchering's 0.0375, 1 = very broad).
 double lowessFracForSmoothing (double amount01);

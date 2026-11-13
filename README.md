@@ -17,14 +17,15 @@ Get the latest `MatchMaster-vX.Y.Z-macOS-VST3.zip` from **[Releases](https://git
 
 ## How it works
 
-1. **References** – drop up to 3 well-mastered songs into slots **A / B / C**. Each gets an automatic flavour word (*Bright, Warm, Heavy, Airy, Wide, Focused, Loud, Dynamic, Balanced*) — double-click it to rename.
+1. **References** – drop up to 3 well-mastered songs into slots **A / B / C**.
 2. **Learn** – press Learn and play your track (at least 5 s, ideally the loudest part), then press Stop. One Learn matches all three profiles.
 3. **Listen** – click A / B / C to compare. The match is applied live, non-destructively:
    - **Match** knob: 0 % = your original, 100 % = the full Matchering result
+   - **Clip** (0–6 dB, default 0): a clipper (Airwindows ClipOnly2) shaves that many dB off the loudest peaks before the limiter — punchier loudness, less limiting
    - **Limiter** (visible, always under your control): on/off, true peak (default on), ceiling (default −1 dBTP), gain-reduction readout. With the limiter off, the output keeps its headroom and the plugin tells you how much gain to push into your own limiter to match the reference.
    - **Advanced**: matching EQ curve, Mid EQ / Side EQ / Loudness amounts, EQ **Smoothing**, **Max correction**, EQ mode **Linear** (phase-exact, ~92 ms latency) or **Natural** (no pre-echo, ~7 ms latency)
 
-Re-learn after big mix changes. The learned match and references are not saved with the DAW project yet.
+Re-learn after big mix changes. References and the learned match are saved with your DAW project; after reopening, everything works, but loading a *new* reference needs a new Learn (the learned audio itself is not stored).
 
 ## What it does to the sound
 
@@ -35,10 +36,11 @@ A C++ port of Matchering's processing, run in real time:
 | Loudness match on the loudest ~15 s pieces (mid channel) | same, measured during Learn |
 | Matching EQ: averaged spectra of reference ÷ track, smoothed (cubic spline + LOWESS) | same, applied as a linear-phase FIR, separately on Mid and Side |
 | RMS correction passes (×4) | same |
+| — | optional clipper before the limiter: [ClipOnly2](https://github.com/airwindows/airwindows) by Airwindows |
 | "Hyrax" brickwall limiter (non-causal) | real-time port with ~5 ms lookahead, 4× true-peak detection, adjustable ceiling, optional |
 | Final level from the reference's peak | same |
 
-Latency is reported to the host (≈ 92 ms at 48 kHz).
+Latency is reported to the host (≈ 95 ms at 48 kHz in Linear mode, ≈ 10 ms in Natural mode).
 
 ## Build
 
@@ -65,12 +67,14 @@ cmake --build build --target MatchMasterCLI MatchMasterFlowTest -j
 
 ## Roadmap
 
-- Save references and the learned match with the DAW project
-- Airwindows stages (ToVinyl, Channel9, Point, Surge, Stonefire, Slew)
+- **v2.2 – Fix the mix**: a FIX section before the master — *Dynamic match* (per-band mid/side dynamics learned from a reference, cut-only by default), mono bass; optional separate "fix" reference
+- **v2.3 – Character**: Point (punch), PowerSag, Channel9, Acceleration/Slew, Stonefire (Airwindows)
+- **v3.0** – new GUI
 
 ## Credits & license
 
 - Matching algorithm: [Matchering](https://github.com/sergree/matchering) © 2016–2022 Sergree, GPLv3 — ported to C++ for real time (see [NOTICE](NOTICE))
+- Clipper: [ClipOnly2](https://github.com/airwindows/airwindows) by Chris Johnson / Airwindows, MIT licence
 - Framework: [JUCE](https://juce.com) (AGPLv3 / commercial)
 
 MatchMaster is free software under the **GNU GPL v3** – see [LICENSE](LICENSE).
