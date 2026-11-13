@@ -166,6 +166,74 @@ int prepTest()
     return failures;
 }
 
+// Real songs: flowtest --real <mix> <reference>. Taste (in 2 s chunks, GUI timer running), then Unclump at 100 %.
+int realTest (const juce::File& mixFile, const juce::File& refFile)
+{
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (mixFile));
+    if (rd == nullptr) { std::cout << "can't read " << mixFile.getFullPathName() << "\n"; return 1; }
+    const double rate = rd->sampleRate;
+    juce::AudioBuffer<float> mix (2, (int) rd->lengthInSamples);
+    rd->read (&mix, 0, mix.getNumSamples(), 0, true, true);
+    auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+    MacAndCheeseProcessor proc;
+    proc.setPlayConfigDetails (2, 2, rate, 512);
+    proc.prepareToPlay (rate, 512);
+    proc.loadReference (0, refFile);
+    for (int t = 0; t < 600 && (proc.getSnapshot().slots[0].busy || ! proc.getSnapshot().slots[0].loaded); ++t) pump (50);
+    std::cout << "mix: " << mixFile.getFileName() << " (" << juce::roundToInt (mix.getNumSamples() / rate) << " s)\ncheese: " << refFile.getFileName() << "\n";
+
+    juce::MidiBuffer midi;
+    juce::AudioBuffer<float> block (2, 512);
+    auto play = [&] (int from, int to, std::array<float, mm::prepBands>* maxRed, std::array<double, mm::prepBands>* busy)
+    {
+        int blocks = 0;
+        for (int pos = from; pos + 512 <= to; pos += 512, ++blocks)
+        {
+            for (int ch = 0; ch < 2; ++ch) block.copyFrom (ch, 0, mix, ch, pos, 512);
+            proc.processBlock (block, midi);
+            if (maxRed != nullptr)
+                for (int b = 0; b < mm::prepBands; ++b)
+                {
+                    const float r = proc.bandReduction[(size_t) b].exchange (0.0f);
+                    (*maxRed)[(size_t) b] = std::max ((*maxRed)[(size_t) b], r);
+                    (*busy)[(size_t) b] += r > 1.0f ? 1.0 : 0.0;
+                }
+        }
+        return blocks;
+    };
+    proc.startLearning();
+    const int chunk = (int) (2 * rate);
+    juce::String timeline;
+    double enoughAt = -1;
+    for (int pos = 0; pos + chunk <= mix.getNumSamples() && proc.getLearnState() == MacAndCheeseProcessor::LearnState::listening; pos += chunk)
+    {
+        play (pos, pos + chunk, nullptr, nullptr);
+        pump (150);
+        const double secs = proc.getCaptureSeconds();
+        if (proc.learnEnough.load() && enoughAt < 0) enoughAt = secs;
+        if (juce::roundToInt (secs) % 15 < 2) timeline << juce::roundToInt (secs) << "s:" << juce::String (proc.learnDeviationDb.load(), 1) << " ";
+    }
+    std::cout << "Taste: spectrum change per 15 s slice: " << timeline << "\n";
+    std::cout << "Taste: " << (enoughAt >= 0 ? "says 'enough' at " + juce::String (enoughAt, 0) + " s" : juce::String ("never says 'enough'")) << "\n";
+    proc.stopLearning();
+    for (int t = 0; t < 1200 && ! proc.getSnapshot().slots[0].matched; ++t) pump (50);
+    pump (500);
+
+    auto* u = proc.apvts.getParameter ("unclump");
+    u->setValueNotifyingHost (1.0f);
+    pump (12000); // re-match on the prepped track
+    std::array<float, mm::prepBands> maxRed {};
+    std::array<double, mm::prepBands> busy {};
+    const int blocks = play (0, mix.getNumSamples(), &maxRed, &busy);
+    const char* names[] = { "Bottom", "Mud", "Body", "Bite", "Fizz" };
+    std::cout << "Unclump 100 %: max cut / time cutting more than 1 dB\n";
+    for (int b = 0; b < mm::prepBands; ++b)
+        std::cout << "  " << names[b] << ": " << juce::String (maxRed[(size_t) b], 1) << " dB, " << juce::roundToInt (100.0 * busy[(size_t) b] / blocks) << " %\n";
+    return 0;
+}
+
 int loadVst3 (const juce::String& path)
 {
     juce::VST3PluginFormat fmt;
@@ -190,6 +258,8 @@ int loadVst3 (const juce::String& path)
 int main (int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI gui;
+    if (argc > 3 && juce::String (argv[1]) == "--real")
+        return realTest (juce::File (argv[2]), juce::File (argv[3]));
     if (argc > 2 && juce::String (argv[1]) == "--load-vst3")
         return loadVst3 (argv[2]);
     const juce::File outDir (argc > 1 ? argv[1] : juce::File::getCurrentWorkingDirectory().getFullPathName());
