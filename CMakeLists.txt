@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(MatchMaster VERSION 2.0.0)
+project(MatchMaster VERSION 2.0.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,6 +35,15 @@ target_compile_definitions(MatchMaster PUBLIC
 target_link_libraries(MatchMaster
     PRIVATE juce::juce_audio_utils juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
+
+# JUCE signs the bundle before writing moduleinfo.json, which breaks the seal
+# ("damaged" on download). Re-sign last, after every JUCE post-build step.
+if(APPLE)
+    add_custom_command(TARGET MatchMaster_VST3 POST_BUILD
+        COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:MatchMaster_VST3>"
+        COMMAND codesign --verify --deep --strict "$<TARGET_BUNDLE_DIR:MatchMaster_VST3>"
+        VERBATIM)
+endif()
 
 # ---------------------------------------------------------------- test / offline tool
 juce_add_console_app(MatchMasterCLI PRODUCT_NAME "matchmaster-cli")

@@ -2,6 +2,12 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MatchMaster/releases).
 
+## v2.0.1 — fix "damaged" plugin on macOS
+
+- Fixed: macOS said "MatchMaster.vst3 is damaged" after downloading v2.0.0, and DAWs did not list it. The plugin was re-signed too early in the build; it is now signed as the last step.
+- No change to the sound.
+- If your DAW scanned the broken v2.0.0, replace it with this version and re-scan plugins (REAPER: Preferences → Plug-ins → VST → Re-scan, or "Clear cache/re-scan" if it is still missing).
+
 ## v2.0.0 — profiles, true-peak limiter, EQ controls
 
 **Profiles**
