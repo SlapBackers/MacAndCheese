@@ -6,6 +6,7 @@
 #pragma once
 
 #include <juce_audio_basics/juce_audio_basics.h>
+#include "TruePeak.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -45,6 +46,7 @@ public:
             v = (float) (v / sum);
 
         latency = half + kHalf;
+        totalLatency = latency + TruePeakDetector::getDelaySamples();
 
         holdLp.design (s.holdFilterHz, sampleRate);
         releaseLp.design (s.releaseFilterCoef / s.releaseMs, sampleRate);
@@ -53,7 +55,8 @@ public:
         sRing.init (std::max (2 * kHalf + 1, kHalf + hold));
         audio.resize ((size_t) numChannels);
         for (auto& a : audio)
-            a.init (latency + 1);
+            a.init (totalLatency + 1);
+        detectors.assign ((size_t) numChannels, TruePeakDetector());
         reset();
     }
 
@@ -63,12 +66,18 @@ public:
         sRing.clear();
         for (auto& a : audio)
             a.clear();
+        for (auto& d : detectors)
+            d.reset();
         holdLp.reset();
         releaseLp.reset();
         minGain = 1.0f;
     }
 
-    int getLatencySamples() const noexcept { return latency; }
+    int getLatencySamples() const noexcept { return totalLatency; }
+
+    // Ceiling (linear) and detection mode can change at any time.
+    void setCeiling (float linear) noexcept { settings.threshold = linear; }
+    void setTruePeak (bool on) noexcept { truePeak = on; }
 
     // Processes in place. Always delays by getLatencySamples(); when !enabled the gain is 1.
     void process (float* const* ch, int numCh, int n, bool enabled)
@@ -80,7 +89,9 @@ public:
             float peak = 0.0f;
             for (int c = 0; c < numCh; ++c)
             {
-                peak = std::max (peak, std::abs (ch[c][i]));
+                auto& det = detectors[(size_t) c];
+                const float tp = det.process (ch[c][i]);
+                peak = std::max (peak, truePeak ? tp : det.lastSamplePeak());
                 audio[(size_t) c].push (ch[c][i]);
             }
             // dsp.rectify + flip(1/x): 0 = no reduction
@@ -104,7 +115,7 @@ public:
             const float g = enabled ? 1.0f - std::max ({ ghc.ago (latency), att, release }) : 1.0f;
             minGain = std::min (minGain, g);
             for (int c = 0; c < numCh; ++c)
-                ch[c][i] = audio[(size_t) c].ago (latency) * g;
+                ch[c][i] = audio[(size_t) c].ago (totalLatency) * g;
         }
     }
 
@@ -167,7 +178,9 @@ private:
     };
 
     Settings settings;
-    int window = 1, half = 0, hold = 1, kHalf = 0, latency = 0;
+    int window = 1, half = 0, hold = 1, kHalf = 0, latency = 0, totalLatency = 0;
+    bool truePeak = true;
+    std::vector<TruePeakDetector> detectors;
     std::vector<float> kernel;
     MirrorRing ghc, sRing;
     std::vector<MirrorRing> audio;

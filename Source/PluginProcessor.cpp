@@ -1,27 +1,13 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Core/TruePeak.h"
 
 namespace
 {
-    constexpr int maxCaptureSamples = 180 * 48000;   // ~3 min @ 48k (90 s @ 96k)
+    constexpr int maxCaptureSamples = 180 * 48000;      // ~3 min @ 48k (90 s @ 96k)
     constexpr double minCaptureSeconds = 5.0;
     constexpr double maxReferenceSeconds = 15.0 * 60.0; // Matchering's max_length
-    constexpr float maxEqBoostDb = 24.0f;               // real-time safety net
-
-    juce::String phaseMessage (MatchMasterProcessor::Phase p)
-    {
-        using P = MatchMasterProcessor::Phase;
-        switch (p)
-        {
-            case P::needReference:      return "Step 1 - drop a well-mastered reference song";
-            case P::analysingReference: return "Analysing the reference...";
-            case P::readyToLearn:       return "Step 2 - press Learn and play your track";
-            case P::listening:          return "Listening - play the loudest part, then press Stop";
-            case P::analysingTrack:     return "Matching your track to the reference...";
-            case P::matched:            return "Matched - the result is locked. Re-learn after big mix changes";
-        }
-        return {};
-    }
+    const juce::StringArray slotNames { "A", "B", "C" };
 }
 
 MatchMasterProcessor::MatchMasterProcessor()
@@ -35,7 +21,15 @@ MatchMasterProcessor::MatchMasterProcessor()
     pMidEq = apvts.getRawParameterValue ("midEq");
     pSideEq = apvts.getRawParameterValue ("sideEq");
     pLoudness = apvts.getRawParameterValue ("loudness");
-    message = phaseMessage (Phase::needReference);
+    pSmoothing = apvts.getRawParameterValue ("smoothing");
+    pMaxCorr = apvts.getRawParameterValue ("maxCorr");
+    pEqMode = apvts.getRawParameterValue ("eqMode");
+    pLimiter = apvts.getRawParameterValue ("limiter");
+    pTruePeak = apvts.getRawParameterValue ("truePeak");
+    pCeiling = apvts.getRawParameterValue ("ceiling");
+    pProfile = apvts.getRawParameterValue ("profile");
+    for (auto& b : slotBusy)
+        b = false;
     startTimerHz (30);
 }
 
@@ -47,16 +41,30 @@ MatchMasterProcessor::~MatchMasterProcessor()
 
 juce::AudioProcessorValueTreeState::ParameterLayout MatchMasterProcessor::createLayout()
 {
-    using P = juce::AudioParameterFloat;
+    using F = juce::AudioParameterFloat;
+    using B = juce::AudioParameterBool;
+    using Ch = juce::AudioParameterChoice;
     auto pct = juce::AudioParameterFloatAttributes().withStringFromValueFunction (
         [] (float v, int) { return juce::String (juce::roundToInt (v)) + " %"; });
+    auto db = juce::AudioParameterFloatAttributes().withStringFromValueFunction (
+        [] (float v, int) { return juce::String (v, 1) + " dB"; });
+    const juce::NormalisableRange<float> percent (0.0f, 100.0f, 0.1f);
 
-    juce::AudioProcessorValueTreeState::ParameterLayout layout;
-    layout.add (std::make_unique<P> (juce::ParameterID { "match", 1 }, "Match", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f, pct));
-    layout.add (std::make_unique<P> (juce::ParameterID { "midEq", 1 }, "Mid EQ", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f, pct));
-    layout.add (std::make_unique<P> (juce::ParameterID { "sideEq", 1 }, "Side EQ", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f, pct));
-    layout.add (std::make_unique<P> (juce::ParameterID { "loudness", 1 }, "Loudness", juce::NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f, pct));
-    return layout;
+    juce::AudioProcessorValueTreeState::ParameterLayout l;
+    l.add (std::make_unique<F> (juce::ParameterID { "match", 1 }, "Match", percent, 100.0f, pct));
+    l.add (std::make_unique<Ch> (juce::ParameterID { "profile", 1 }, "Profile", slotNames, 0));
+    // EQ
+    l.add (std::make_unique<F> (juce::ParameterID { "midEq", 1 }, "Mid EQ", percent, 100.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "sideEq", 1 }, "Side EQ", percent, 100.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "smoothing", 1 }, "EQ Smoothing", percent, 0.0f, pct));
+    l.add (std::make_unique<F> (juce::ParameterID { "maxCorr", 1 }, "Max Correction", juce::NormalisableRange<float> (3.0f, 24.0f, 0.1f), 12.0f, db));
+    l.add (std::make_unique<Ch> (juce::ParameterID { "eqMode", 1 }, "EQ Mode", juce::StringArray { "Linear", "Natural" }, 0));
+    // loudness + limiter
+    l.add (std::make_unique<F> (juce::ParameterID { "loudness", 1 }, "Loudness", percent, 100.0f, pct));
+    l.add (std::make_unique<B> (juce::ParameterID { "limiter", 1 }, "Limiter", true));
+    l.add (std::make_unique<B> (juce::ParameterID { "truePeak", 1 }, "True Peak", true));
+    l.add (std::make_unique<F> (juce::ParameterID { "ceiling", 1 }, "Ceiling", juce::NormalisableRange<float> (-6.0f, 0.0f, 0.1f), -1.0f, db));
+    return l;
 }
 
 bool MatchMasterProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -85,8 +93,14 @@ void MatchMasterProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     loudGain.setCurrentAndTargetValue (1.0f);
     finalGain.setCurrentAndTargetValue (1.0f);
 
-    setLatencySamples (firSize / 2 + limiter.getLatencySamples());
+    builtMode = -1;
     rebuildFirs (true);
+}
+
+void MatchMasterProcessor::updateLatency()
+{
+    const bool natural = pEqMode->load() > 0.5f;
+    setLatencySamples ((natural ? 0 : firSize / 2) + limiter.getLatencySamples());
 }
 
 void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -112,9 +126,34 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             capturing.store (false); // buffer full: the timer finishes learning
     }
 
-    const float match = pMatch->load() * 0.01f;
-    loudGain.setTargetValue (juce::Decibels::decibelsToGain (matchGainDb.load() * match * pLoudness->load() * 0.01f));
-    finalGain.setTargetValue (juce::Decibels::decibelsToGain (refLevelDb.load() * match));
+    // ---- gain staging
+    const bool matched = activeMatched.load();
+    const float match = matched ? pMatch->load() * 0.01f : 0.0f;
+    const float loud = pLoudness->load() * 0.01f;
+    const bool limOn = pLimiter->load() > 0.5f;
+    const float ceilingDb = pCeiling->load();
+    limiter.setCeiling (juce::Decibels::decibelsToGain (ceilingDb));
+    limiter.setTruePeak (pTruePeak->load() > 0.5f);
+
+    float preDb = activeGainDb.load() * match * loud;
+    float postDb = activeRefDb.load() * match;
+    if (! limOn)
+    {
+        // no limiter: keep the output under the ceiling, report what's missing
+        const float targetDb = preDb + postDb;
+        const float eqAmt = match * pMidEq->load() * 0.01f;
+        const float peakDb = exactPeakValid.load()
+                                 ? exactPeakDb.load()
+                                 : activeTrackPeakDb.load() + (activeEqPeakDb.load() - activeTrackPeakDb.load()) * eqAmt + 2.0f; // estimate + margin until measured
+        const float applied = matched ? juce::jmin (targetDb, ceilingDb - peakDb) : 0.0f;
+        suggestionDb.store (matched ? juce::jmax (0.0f, targetDb - applied) : 0.0f);
+        preDb = applied;
+        postDb = 0.0f;
+    }
+    else
+        suggestionDb.store (0.0f);
+    loudGain.setTargetValue (juce::Decibels::decibelsToGain (preDb));
+    finalGain.setTargetValue (juce::Decibels::decibelsToGain (postDb));
 
     float peakL = 0.0f, peakR = 0.0f;
     for (int off = 0; off < total; off += maxBlock)
@@ -125,23 +164,20 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
         float* m = midBuf.getWritePointer (0);
         float* s = sideBuf.getWritePointer (0);
 
-        // dsp.lr_to_ms
-        for (int i = 0; i < n; ++i)
+        for (int i = 0; i < n; ++i) // dsp.lr_to_ms
         {
             const float li = l[i], ri = r != nullptr ? r[i] : li;
             m[i] = (li + ri) * 0.5f;
             s[i] = m[i] - ri;
         }
 
-        // matching EQ (linear-phase FIR, separate for mid and side)
         juce::dsp::AudioBlock<float> mb (midBuf), sb (sideBuf);
         auto mSub = mb.getSubBlock (0, (size_t) n);
         auto sSub = sb.getSubBlock (0, (size_t) n);
         midConv.process (juce::dsp::ProcessContextReplacing<float> (mSub));
         sideConv.process (juce::dsp::ProcessContextReplacing<float> (sSub));
 
-        // dsp.ms_to_lr + loudness match
-        for (int i = 0; i < n; ++i)
+        for (int i = 0; i < n; ++i) // dsp.ms_to_lr + loudness
         {
             const float g = loudGain.getNextValue();
             l[i] = (m[i] + s[i]) * g;
@@ -149,9 +185,8 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
                 r[i] = (m[i] - s[i]) * g;
         }
 
-        // Hyrax brickwall limiter, then the reference's peak level
         float* chans[2] = { l, r };
-        limiter.process (chans, r != nullptr ? 2 : 1, n, true);
+        limiter.process (chans, r != nullptr ? 2 : 1, n, limOn);
         for (int i = 0; i < n; ++i)
         {
             const float fg = finalGain.getNextValue();
@@ -167,27 +202,39 @@ void MatchMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 
     meterL.store (juce::jmax (peakL, meterL.load() * 0.92f));
     meterR.store (juce::jmax (numCh > 1 ? peakR : peakL, meterR.load() * 0.92f));
-    meterGr.store (juce::jmin (meterGr.load(), limiter.popMinGain()));
+    const float g = limiter.popMinGain();
+    meterGr.store (juce::jmin (meterGr.load(), g));
+    maxGrDb.store (juce::jmax (maxGrDb.load(), -juce::Decibels::gainToDecibels (g, -60.0f)));
 }
 
-// ------------------------------------------------------------------ reference / learn
+// ------------------------------------------------------------------ references / learn
 
-void MatchMasterProcessor::loadReference (const juce::File& file)
+mm::Config MatchMasterProcessor::configFor (double frac) const
 {
-    if (! file.existsAsFile())
+    auto c = config;
+    c.lowessFrac = frac;
+    return c;
+}
+
+double MatchMasterProcessor::currentFrac() const
+{
+    return mm::lowessFracForSmoothing (pSmoothing->load() * 0.01);
+}
+
+void MatchMasterProcessor::loadReference (int slot, const juce::File& file)
+{
+    if (slot < 0 || slot >= numSlots || ! file.existsAsFile() || slotBusy[(size_t) slot])
         return;
+    slotBusy[(size_t) slot] = true;
+    setMessage ({}, false);
 
-    const auto prev = phase.load();
-    phase = Phase::analysingReference;
-    setMessage (phaseMessage (Phase::analysingReference), false);
-
-    pool.addJob ([this, file, prev]
+    pool.addJob ([this, slot, file]
     {
         try
         {
             std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
             if (reader == nullptr)
-                throw std::runtime_error ("This file format can't be read.");
+                throw std::runtime_error ("this file format can't be read.");
 
             const auto len = (int) juce::jmin<juce::int64> (reader->lengthInSamples,
                                                             (juce::int64) (maxReferenceSeconds * reader->sampleRate));
@@ -196,103 +243,159 @@ void MatchMasterProcessor::loadReference (const juce::File& file)
 
             auto ref = std::make_shared<mm::ReferenceProfile> (
                 mm::analyzeReference (mm::toStereoAtRate (raw, reader->sampleRate, config.sampleRate), config));
-
-            bool haveTrack;
             {
                 const juce::ScopedLock sl (dataLock);
-                reference = ref;
-                referenceName = file.getFileNameWithoutExtension();
-                haveTrack = captureCopy.getNumSamples() > 0;
+                auto& s = slots[(size_t) slot];
+                s.ref = ref;
+                s.result = nullptr;
+                s.name = file.getFileNameWithoutExtension();
+                s.flavour = mm::describeReference (*ref, config);
             }
-
-            if (haveTrack)
-            {
-                phase = Phase::analysingTrack; // re-match the already learned track
-                computeMatch();
-            }
-            else
-            {
-                phase = Phase::readyToLearn;
-                setMessage (phaseMessage (Phase::readyToLearn), false);
-            }
+            resultsChanged = true;
+            matchSlots ({ slot });
         }
         catch (const std::exception& e)
         {
-            phase = prev == Phase::analysingReference ? Phase::needReference : prev;
-            setMessage (juce::String ("Reference: ") + e.what(), true);
+            setMessage ("Reference " + slotNames[slot] + ": " + e.what(), true);
         }
+        slotBusy[(size_t) slot] = false;
     });
+
+    selectSlot (slot);
+}
+
+void MatchMasterProcessor::setFlavour (int slot, const juce::String& word)
+{
+    const juce::ScopedLock sl (dataLock);
+    if (slot >= 0 && slot < numSlots)
+        slots[(size_t) slot].flavour = word.trim();
+}
+
+void MatchMasterProcessor::selectSlot (int slot)
+{
+    if (auto* p = apvts.getParameter ("profile"))
+        p->setValueNotifyingHost (p->convertTo0to1 ((float) slot));
+}
+
+int MatchMasterProcessor::getActiveSlot() const
+{
+    return juce::jlimit (0, numSlots - 1, (int) std::lround (pProfile->load()));
 }
 
 void MatchMasterProcessor::startLearning()
 {
-    const auto p = phase.load();
-    if (capturing.load() || (p != Phase::readyToLearn && p != Phase::matched))
+    if (capturing.load() || learnState != LearnState::idle)
         return;
-
     if (capture.getNumSamples() != maxCaptureSamples)
-        capture.setSize (2, maxCaptureSamples); // message thread; audio thread only writes while capturing
+        capture.setSize (2, maxCaptureSamples); // audio thread only writes while capturing
     captureRate = hostRate;
     capturePos = 0;
-    phase = Phase::listening;
-    setMessage (phaseMessage (Phase::listening), false);
+    learnState = LearnState::listening;
+    setMessage ({}, false);
     capturing.store (true, std::memory_order_release);
 }
 
 void MatchMasterProcessor::stopLearning()
 {
-    if (phase != Phase::listening)
+    if (learnState != LearnState::listening)
         return;
     capturing.store (false, std::memory_order_release);
 
     const int n = capturePos.load();
     if ((double) n / captureRate < minCaptureSeconds)
     {
-        phase = Phase::readyToLearn;
+        learnState = LearnState::idle;
         setMessage ("Too short - play at least " + juce::String ((int) minCaptureSeconds) + " seconds of your track", true);
         return;
     }
 
+    juce::AudioBuffer<float> copy (2, n);
+    copy.copyFrom (0, 0, capture, 0, 0, n);
+    copy.copyFrom (1, 0, capture, 1, 0, n);
+    learnState = LearnState::analysing;
+
+    pool.addJob ([this, buf = std::move (copy), rate = captureRate]
     {
-        const juce::ScopedLock sl (dataLock);
-        captureCopy.setSize (2, n);
-        captureCopy.copyFrom (0, 0, capture, 0, 0, n);
-        captureCopy.copyFrom (1, 0, capture, 1, 0, n);
-    }
-    phase = Phase::analysingTrack;
-    setMessage (phaseMessage (Phase::analysingTrack), false);
-    pool.addJob ([this] { computeMatch(); });
+        try
+        {
+            auto t = std::make_shared<mm::TargetProfile> (
+                mm::analyzeTarget (mm::toStereoAtRate (buf, rate, config.sampleRate), config));
+            {
+                const juce::ScopedLock sl (dataLock);
+                track = t;
+            }
+            matchSlots ({ 0, 1, 2 });
+        }
+        catch (const std::exception& e)
+        {
+            setMessage (juce::String ("Learn: ") + e.what(), true);
+        }
+        learnState = LearnState::idle;
+    });
 }
 
-void MatchMasterProcessor::computeMatch()
+void MatchMasterProcessor::matchSlots (std::vector<int> which)
 {
-    try
+    std::shared_ptr<mm::TargetProfile> t;
+    double frac;
+    {
+        const juce::ScopedLock sl (dataLock);
+        t = track;
+        frac = requestedFrac;
+    }
+    if (t == nullptr)
+        return;
+
+    for (int i : which)
     {
         std::shared_ptr<mm::ReferenceProfile> ref;
-        juce::AudioBuffer<float> track;
-        double rate;
         {
             const juce::ScopedLock sl (dataLock);
-            ref = reference;
-            track.makeCopyOf (captureCopy);
-            rate = captureRate;
+            ref = slots[(size_t) i].ref;
         }
         if (ref == nullptr)
-            throw std::runtime_error ("No reference loaded.");
+            continue;
+        try
+        {
+            auto res = std::make_shared<mm::MatchResult> (mm::match (*t, *ref, configFor (frac)));
+            const juce::ScopedLock sl (dataLock);
+            if (slots[(size_t) i].ref == ref)
+                slots[(size_t) i].result = res;
+        }
+        catch (const std::exception& e)
+        {
+            setMessage ("Profile " + slotNames[i] + ": " + e.what(), true);
+        }
+    }
+    resultsChanged = true;
+}
 
-        const auto tgt = mm::analyzeTarget (mm::toStereoAtRate (track, rate, config.sampleRate), config);
-        auto res = std::make_shared<mm::MatchResult> (mm::match (tgt, *ref, config));
+void MatchMasterProcessor::resmooth (double frac)
+{
+    for (int i = 0; i < numSlots; ++i)
+    {
+        std::shared_ptr<mm::MatchResult> old;
         {
             const juce::ScopedLock sl (dataLock);
-            pendingResult = res;
+            old = slots[(size_t) i].result;
         }
-        resultReady = true;
+        if (old == nullptr)
+            continue;
+        auto res = std::make_shared<mm::MatchResult> (*old);
+        const auto cfg = configFor (frac);
+        res->midCurve = mm::smoothMatchingCurve (res->midMatching, cfg);
+        res->sideCurve = mm::smoothMatchingCurve (res->sideMatching, cfg);
+        const juce::ScopedLock sl (dataLock);
+        if (slots[(size_t) i].result == old)
+            slots[(size_t) i].result = res;
     }
-    catch (const std::exception& e)
-    {
-        phase = Phase::readyToLearn;
-        setMessage (juce::String ("Learn: ") + e.what(), true);
-    }
+    resultsChanged = true;
+}
+
+bool MatchMasterProcessor::hasLearnedTrack() const
+{
+    const juce::ScopedLock sl (dataLock);
+    return track != nullptr;
 }
 
 double MatchMasterProcessor::getCaptureSeconds() const noexcept { return capturePos.load() / juce::jmax (1.0, captureRate); }
@@ -307,20 +410,46 @@ void MatchMasterProcessor::setMessage (const juce::String& m, bool isError)
 
 MatchMasterProcessor::Snapshot MatchMasterProcessor::getSnapshot() const
 {
+    const int active = getActiveSlot();
     const juce::ScopedLock sl (dataLock);
     Snapshot s;
-    if (result != nullptr)
+    bool anyRef = false;
+    for (int i = 0; i < numSlots; ++i)
     {
-        s.midCurve = result->midCurve;
-        s.sideCurve = result->sideCurve;
-        s.curveRate = result->curveSampleRate;
-        s.curveFft = result->curveFftSize;
+        const auto& slot = slots[(size_t) i];
+        auto& info = s.slots[(size_t) i];
+        info.loaded = slot.ref != nullptr;
+        info.busy = slotBusy[(size_t) i];
+        info.matched = slot.result != nullptr;
+        info.name = slot.name;
+        info.flavour = slot.flavour;
+        anyRef |= info.loaded || info.busy;
     }
-    s.gainDb = matchGainDb.load();
-    s.refLevelDb = refLevelDb.load();
-    s.referenceName = referenceName;
-    s.message = message;
-    s.messageIsError = messageIsError;
+    if (const auto& r = slots[(size_t) active].result)
+    {
+        s.midCurve = r->midCurve;
+        s.sideCurve = r->sideCurve;
+        s.curveRate = r->curveSampleRate;
+        s.curveFft = r->curveFftSize;
+        s.gainDb = juce::Decibels::gainToDecibels (r->totalGain(), -100.0);
+        s.refLevelDb = juce::Decibels::gainToDecibels (r->finalAmplitudeCoef, -100.0);
+    }
+
+    s.messageIsError = messageIsError && message.isNotEmpty();
+    if (s.messageIsError)
+        s.message = message;
+    else if (learnState == LearnState::listening)
+        s.message = "Listening - play the loudest part of your track, then press Stop";
+    else if (learnState == LearnState::analysing)
+        s.message = "Matching your track to the references...";
+    else if (! anyRef && track == nullptr)
+        s.message = "Drop up to 3 mastered songs into A, B, C - then press Learn and play your track";
+    else if (track == nullptr)
+        s.message = "Press Learn and play your track";
+    else if (! s.slots[(size_t) active].loaded)
+        s.message = "Drop a reference into slot " + slotNames[active];
+    else if (s.slots[(size_t) active].matched)
+        s.message = "Profile " + slotNames[active] + " matched - switch A / B / C to compare";
     return s;
 }
 
@@ -328,55 +457,142 @@ MatchMasterProcessor::Snapshot MatchMasterProcessor::getSnapshot() const
 
 void MatchMasterProcessor::timerCallback()
 {
-    if (phase == Phase::listening && ! capturing.load())
+    if (learnState == LearnState::listening && ! capturing.load())
         stopLearning(); // capture buffer filled up
 
-    if (resultReady.exchange (false))
+    // EQ smoothing knob -> re-smooth the stored matching curves in the background
+    const double frac = currentFrac();
+    if (std::abs (frac - requestedFrac) > 1e-5 && ! resmoothPending.load())
     {
         {
             const juce::ScopedLock sl (dataLock);
-            result = pendingResult;
+            requestedFrac = frac;
         }
-        matchGainDb = (float) juce::Decibels::gainToDecibels (result->totalGain(), -100.0);
-        refLevelDb = (float) juce::Decibels::gainToDecibels (result->finalAmplitudeCoef, -100.0);
-        phase = Phase::matched;
-        setMessage (phaseMessage (Phase::matched), false);
-        rebuildFirs (true);
-        return;
+        resmoothPending = true;
+        pool.addJob ([this, frac] { resmooth (frac); resmoothPending = false; });
     }
-    rebuildFirs (false);
+
+    const int active = getActiveSlot();
+    if (resultsChanged.exchange (false) || active != shownSlot)
+        applyActiveSlot (true);
+    else
+        rebuildFirs (false);
+
+    if (pLimiter->load() < 0.5f)
+        updateHeadroom();
+}
+
+void MatchMasterProcessor::updateHeadroom()
+{
+    auto src = firSource;
+    std::shared_ptr<mm::TargetProfile> t;
+    {
+        const juce::ScopedLock sl (dataLock);
+        t = track;
+    }
+    if (src == nullptr || t == nullptr)
+        return;
+
+    const float match = pMatch->load() * 0.01f;
+    const float midAmt = match * pMidEq->load() * 0.01f, sideAmt = match * pSideEq->load() * 0.01f;
+    const float maxCorr = pMaxCorr->load();
+    const bool natural = pEqMode->load() > 0.5f;
+    const auto key = juce::String::toHexString ((juce::pointer_sized_int) src.get()) + ":" + juce::String (midAmt, 3) + ":"
+                     + juce::String (sideAmt, 3) + ":" + juce::String (maxCorr, 1) + ":" + juce::String ((int) natural);
+    if (key == lastPeakKey || peakJobPending.load())
+        return;
+    lastPeakKey = key;
+    exactPeakValid = false;
+    peakJobPending = true;
+
+    pool.addJob ([this, src, t, midAmt, sideAmt, maxCorr, natural, key]
+    {
+        // same EQ as the live chain, designed at the analysis rate, run over the learned track
+        const auto& c = config;
+        auto midFir = mm::designFir (src->midCurve, src->curveSampleRate, src->curveFftSize, c.sampleRate, c.fftSize, midAmt, maxCorr, natural);
+        auto sideFir = mm::designFir (src->sideCurve, src->curveSampleRate, src->curveFftSize, c.sampleRate, c.fftSize, sideAmt, maxCorr, natural);
+        auto m = mm::convolveSame (t->mid, midFir);
+        auto sd = mm::convolveSame (t->side, sideFir);
+        if (natural) // minimum-phase FIR has no centre delay: undo convolveSame's centring
+        {
+            const int shift = (c.fftSize - 1) / 2;
+            auto fullM = std::vector<float> (m.size(), 0.0f), fullS = fullM;
+            for (size_t i = (size_t) shift; i < m.size(); ++i) { fullM[i] = m[i - (size_t) shift]; fullS[i] = sd[i - (size_t) shift]; }
+            m.swap (fullM);
+            sd.swap (fullS);
+        }
+        std::vector<float> l (m.size()), r (m.size());
+        for (size_t i = 0; i < m.size(); ++i) { l[i] = m[i] + sd[i]; r[i] = m[i] - sd[i]; }
+        const float pk = std::max (mm::TruePeakDetector::measure (l.data(), (int) l.size()),
+                                   mm::TruePeakDetector::measure (r.data(), (int) r.size()));
+        if (key == lastPeakKey)
+        {
+            exactPeakDb = juce::Decibels::gainToDecibels (pk, -120.0f) + 0.8f; // margin: measured at 44.1 kHz, plays at the host rate
+            exactPeakValid = true;
+        }
+        peakJobPending = false;
+    });
+}
+
+void MatchMasterProcessor::applyActiveSlot (bool forceFirs)
+{
+    const int active = getActiveSlot();
+    if (active != shownSlot)
+        maxGrDb = 0.0f;
+    shownSlot = active;
+    {
+        const juce::ScopedLock sl (dataLock);
+        firSource = slots[(size_t) active].result;
+    }
+    if (firSource != nullptr)
+    {
+        activeGainDb = (float) juce::Decibels::gainToDecibels (firSource->totalGain(), -100.0);
+        activeRefDb = (float) juce::Decibels::gainToDecibels (firSource->finalAmplitudeCoef, -100.0);
+        activeTrackPeakDb = (float) firSource->trackPeakDb;
+        activeEqPeakDb = (float) firSource->eqPeakDb;
+    }
+    activeMatched = firSource != nullptr;
+    rebuildFirs (forceFirs);
 }
 
 void MatchMasterProcessor::rebuildFirs (bool force)
 {
     const float match = pMatch->load() * 0.01f;
-    const float midAmt = result != nullptr ? match * pMidEq->load() * 0.01f : 0.0f;
-    const float sideAmt = result != nullptr ? match * pSideEq->load() * 0.01f : 0.0f;
+    const float midAmt = firSource != nullptr ? match * pMidEq->load() * 0.01f : 0.0f;
+    const float sideAmt = firSource != nullptr ? match * pSideEq->load() * 0.01f : 0.0f;
+    const float maxCorr = pMaxCorr->load();
+    const int mode = pEqMode->load() > 0.5f ? 1 : 0;
 
-    auto load = [this] (juce::dsp::Convolution& conv, const std::vector<float>& curve, float amt)
+    const bool modeChanged = mode != builtMode;
+    const bool common = force || modeChanged || std::abs (maxCorr - builtMaxCorr) > 0.05f;
+    if (modeChanged)
+        updateLatency();
+
+    auto load = [this, maxCorr, mode] (juce::dsp::Convolution& conv, const std::vector<float>* curve, float amt)
     {
         static const std::vector<float> flat { 1.0f, 1.0f };
-        const auto& c = curve.empty() ? flat : curve;
-        const double cr = result != nullptr ? result->curveSampleRate : config.sampleRate;
-        const int cf = result != nullptr ? result->curveFftSize : config.fftSize;
-        auto fir = mm::designFir (c, cr, cf, hostRate, firSize, curve.empty() ? 0.0f : amt, maxEqBoostDb);
+        const auto& c = curve != nullptr ? *curve : flat;
+        const double cr = firSource != nullptr ? firSource->curveSampleRate : config.sampleRate;
+        const int cf = firSource != nullptr ? firSource->curveFftSize : config.fftSize;
+        auto fir = mm::designFir (c, cr, cf, hostRate, firSize, curve != nullptr ? amt : 0.0f, maxCorr, mode == 1);
         juce::AudioBuffer<float> ir (1, (int) fir.size());
         ir.copyFrom (0, 0, fir.data(), (int) fir.size());
         conv.loadImpulseResponse (std::move (ir), hostRate, juce::dsp::Convolution::Stereo::no,
                                   juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::no);
     };
 
-    static const std::vector<float> none;
-    if (force || std::abs (midAmt - builtMidAmt) > 0.004f)
+    if (common || std::abs (midAmt - builtMid) > 0.004f)
     {
-        load (midConv, result != nullptr ? result->midCurve : none, midAmt);
-        builtMidAmt = midAmt;
+        load (midConv, firSource != nullptr ? &firSource->midCurve : nullptr, midAmt);
+        builtMid = midAmt;
     }
-    if (force || std::abs (sideAmt - builtSideAmt) > 0.004f)
+    if (common || std::abs (sideAmt - builtSide) > 0.004f)
     {
-        load (sideConv, result != nullptr ? result->sideCurve : none, sideAmt);
-        builtSideAmt = sideAmt;
+        load (sideConv, firSource != nullptr ? &firSource->sideCurve : nullptr, sideAmt);
+        builtSide = sideAmt;
     }
+    builtMaxCorr = maxCorr;
+    builtMode = mode;
 }
 
 // ------------------------------------------------------------------ state (parameters only)

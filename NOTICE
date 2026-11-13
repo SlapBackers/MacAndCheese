@@ -1,0 +1,16 @@
+MatchMaster
+Copyright (C) 2026 SlapBackers
+Licensed under the GNU General Public License v3 (see LICENSE).
+
+MatchMaster is a real-time C++ port of the algorithm of Matchering:
+  Matchering - Audio Matching and Mastering Python Library
+  Copyright (C) 2016-2022 Sergree
+  https://github.com/sergree/matchering
+  Licensed under the GNU General Public License v3.
+
+The following parts are direct ports of Matchering's code and keep its behaviour:
+  Source/Core/Matcher.cpp     (level matching, matching EQ, smoothing, RMS correction)
+  Source/Core/HyraxLimiter.h  (the "Hyrax" limiter, adapted to real time)
+MatchMaster is not affiliated with or endorsed by the Matchering project.
+
+Built with JUCE (https://juce.com), used under the AGPLv3.

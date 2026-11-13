@@ -22,13 +22,19 @@ namespace ui
         juce::Font getTextButtonFont (juce::TextButton&, int) override;
     };
 
-    // Step 1: drop or browse a reference song
+    // One reference slot (A/B/C): drop or browse a song, click to select, double-click the word to rename
     class DropZone : public juce::Component, public juce::FileDragAndDropTarget
     {
     public:
+        DropZone();
         std::function<void (const juce::File&)> onFile;
-        juce::String fileName;
-        bool busy = false;
+        std::function<void()> onSelect;
+        std::function<void (const juce::String&)> onFlavour;
+        juce::String letter, fileName;
+        bool busy = false, selected = false, loaded = false;
+        void setFlavour (const juce::String&);
+        void resized() override;
+        void browse();
 
         void paint (juce::Graphics&) override;
         void mouseUp (const juce::MouseEvent&) override;
@@ -41,6 +47,7 @@ namespace ui
 
     private:
         bool dragOver = false;
+        juce::Label flavour;
         std::unique_ptr<juce::FileChooser> chooser;
     };
 
@@ -49,7 +56,8 @@ namespace ui
     {
     public:
         std::function<void()> onClick;
-        MatchMasterProcessor::Phase phase = MatchMasterProcessor::Phase::needReference;
+        MatchMasterProcessor::LearnState state = MatchMasterProcessor::LearnState::idle;
+        bool learned = false;
         double seconds = 0, maxSeconds = 1;
         float pulse = 0;
 
@@ -65,7 +73,7 @@ namespace ui
     {
     public:
         MatchMasterProcessor::Snapshot snap;
-        float midAmt = 1, sideAmt = 1;
+        float midAmt = 1, sideAmt = 1, maxCorr = 24;
         void paint (juce::Graphics&) override;
     };
 
@@ -93,7 +101,7 @@ private:
     MatchMasterProcessor& proc;
     ui::LookAndFeel lnf;
 
-    ui::DropZone dropZone;
+    std::array<ui::DropZone, MatchMasterProcessor::numSlots> slotZones;
     ui::LearnButton learnButton;
     juce::Label messageLabel;
     juce::Slider matchKnob;
@@ -102,14 +110,23 @@ private:
     juce::TextButton advancedButton { "Advanced" };
 
     ui::CurveView curve;
-    juce::Slider midKnob, sideKnob, loudKnob;
-    juce::Label midLabel, sideLabel, loudLabel, readout;
+    juce::Slider midKnob, sideKnob, loudKnob, smoothKnob, corrKnob;
+    juce::Label midLabel, sideLabel, loudLabel, smoothLabel, corrLabel, readout;
+    juce::ComboBox eqMode;
+
+    // limiter strip (always visible)
+    juce::ToggleButton limiterButton { "Limiter" }, truePeakButton { "True peak" };
+    juce::Slider ceilingSlider;
+    juce::Label ceilingLabel, limiterReadout;
 
     using Attachment = juce::AudioProcessorValueTreeState::SliderAttachment;
-    std::unique_ptr<Attachment> matchAtt, midAtt, sideAtt, loudAtt;
+    using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
+    std::unique_ptr<Attachment> matchAtt, midAtt, sideAtt, loudAtt, smoothAtt, corrAtt, ceilingAtt;
+    std::unique_ptr<ButtonAtt> limiterAtt, truePeakAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;
 
     bool advanced = false;
-    static constexpr int simpleHeight = 400, advancedHeight = 740, width = 640;
+    static constexpr int simpleHeight = 470, advancedHeight = 800, width = 700;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MatchMasterEditor)
 };

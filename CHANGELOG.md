@@ -2,6 +2,29 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MatchMaster/releases).
 
+## v2.0.0 — profiles, true-peak limiter, EQ controls
+
+**Profiles**
+- Three reference slots **A / B / C**, switchable live (automatable). One Learn matches all three.
+- Automatic flavour word per reference (Bright, Warm, Heavy, Airy, Wide, Focused, Loud, Dynamic, Balanced), renamable by double-click.
+
+**Limiter** (no longer a black box)
+- True-peak detection (4× oversampled), on by default — fixes exports going over 0 dB.
+- Ceiling control, default −1 dBTP.
+- Limiter on/off. Off = the output keeps headroom under the ceiling and the plugin shows the gain to push into your own limiter to match the reference loudness.
+- Gain-reduction readout (now / max).
+
+**EQ**
+- **Smoothing** knob: from Matchering's detailed curve to a broad tonal tilt.
+- **Max correction** knob (default ±12 dB, was ±24 dB) — limits the boosts that cause pre-echo.
+- **EQ mode**: Linear (as before) or **Natural** (minimum phase: no pre-echo, latency ≈ 7 ms instead of ≈ 92 ms).
+- Side EQ no longer boosts near-mono content excessively (fixes the odd stereo image).
+
+**Other**
+- Clearer credit to Matchering (README + NOTICE).
+
+Known: flavour words are an uncalibrated heuristic (rename freely); references and the learned match are not saved with the DAW project.
+
 ## v1.0.0 — first release
 
 Semi-real-time Matchering as a VST3 for macOS (Apple Silicon and Intel).

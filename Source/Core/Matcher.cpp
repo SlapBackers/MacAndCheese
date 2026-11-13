@@ -3,6 +3,7 @@
     Each function names the Matchering source it mirrors.
 */
 #include "Matcher.h"
+#include "TruePeak.h"
 
 #include <algorithm>
 #include <cmath>
@@ -425,6 +426,7 @@ TargetProfile analyzeTarget (const juce::AudioBuffer<float>& buf, const Config& 
     t.midSpectrum = averageFft (ms.mid, loud, p.pieceSize, cfg);
     t.sideSpectrum = averageFft (ms.side, loud, p.pieceSize, cfg);
     t.mid = std::move (ms.mid);
+    t.side = std::move (ms.side);
     return t;
 }
 
@@ -441,23 +443,48 @@ MatchResult match (const TargetProfile& tgt, const ReferenceProfile& ref, const 
     // stages.__match_levels -> get_rms_c_and_amplify_pair
     res.rmsCoefficient = ref.matchRms / std::max ((double) cfg.minValue, tgt.matchRms);
 
-    // stages.__match_frequencies -> get_fir (target loudest pieces were amplified first)
-    auto matchingFor = [&] (const std::vector<double>& t, const std::vector<double>& r)
+    // stages.__match_frequencies -> get_fir (target loudest pieces were amplified first).
+    // MatchMaster addition: the side denominator is floored at -30 dB below the mid, so near-mono
+    // content in the track isn't boosted enormously (the cause of a "weird" stereo image).
+    auto matchingFor = [&] (const std::vector<double>& t, const std::vector<double>& r, const std::vector<double>* floorRef)
     {
         std::vector<double> m (r.size());
         for (size_t k = 0; k < r.size(); ++k)
-            m[k] = r[k] / std::max ((double) cfg.minValue, t[k] * res.rmsCoefficient);
+        {
+            double den = t[k];
+            if (floorRef != nullptr)
+                den = std::max (den, 0.0316 * (*floorRef)[k]);
+            m[k] = r[k] / std::max ((double) cfg.minValue, den * res.rmsCoefficient);
+        }
         return m;
     };
-    res.midCurve = smoothMatchingCurve (matchingFor (tgt.midSpectrum, ref.midSpectrum), cfg);
-    res.sideCurve = smoothMatchingCurve (matchingFor (tgt.sideSpectrum, ref.sideSpectrum), cfg);
+    res.midMatching = matchingFor (tgt.midSpectrum, ref.midSpectrum, nullptr);
+    res.sideMatching = matchingFor (tgt.sideSpectrum, ref.sideSpectrum, &tgt.midSpectrum);
+    res.midCurve = smoothMatchingCurve (res.midMatching, cfg);
+    res.sideCurve = smoothMatchingCurve (res.sideMatching, cfg);
+
+    // EQ the learned track once (unity gain): peaks for the "limiter off" headroom, mid for RMS correction
+    auto midFir = designFir (res.midCurve, cfg.sampleRate, cfg.fftSize, cfg.sampleRate, cfg.fftSize, 1.0f, 0.0f);
+    auto sideFir = designFir (res.sideCurve, cfg.sampleRate, cfg.fftSize, cfg.sampleRate, cfg.fftSize, 1.0f, 0.0f);
+    auto midEq = convolveSame (tgt.mid, midFir);
+    {
+        auto sideEq = convolveSame (tgt.side, sideFir);
+        auto stereoPeakDb = [] (const std::vector<float>& m, const std::vector<float>& sd)
+        {
+            std::vector<float> l (m.size()), r (m.size());
+            for (size_t i = 0; i < m.size(); ++i) { l[i] = m[i] + sd[i]; r[i] = m[i] - sd[i]; }
+            const float pk = std::max (TruePeakDetector::measure (l.data(), (int) l.size()),
+                                       TruePeakDetector::measure (r.data(), (int) r.size()));
+            return (double) juce::Decibels::gainToDecibels (pk, -120.0f);
+        };
+        res.trackPeakDb = stereoPeakDb (tgt.mid, tgt.side);
+        res.eqPeakDb = stereoPeakDb (midEq, sideEq);
+    }
 
     // stages.__correct_levels: iterate on the clipped, EQ'd mid signal
-    auto fir = designFir (res.midCurve, cfg.sampleRate, cfg.fftSize, cfg.sampleRate, cfg.fftSize, 1.0f, 0.0f);
-    std::vector<float> mid (tgt.mid);
-    for (auto& v : mid)
+    std::vector<float> resultMid (std::move (midEq));
+    for (auto& v : resultMid)
         v *= (float) res.rmsCoefficient;
-    auto resultMid = convolveSame (mid, fir);
 
     const Pieces p { tgt.pieceSize, tgt.divisions };
     std::vector<float> clipped (resultMid.size());
@@ -475,8 +502,58 @@ MatchResult match (const TargetProfile& tgt, const ReferenceProfile& ref, const 
     return res;
 }
 
+namespace
+{
+    // Minimum-phase FIR from a magnitude response via the real cepstrum (homomorphic method).
+    template <typename MagFn>
+    std::vector<float> minimumPhaseFir (MagFn magAtHz, double rate, int n)
+    {
+        const int m = n * 4; // finer grid limits cepstral aliasing
+        juce::dsp::FFT fft (orderFor (m));
+        using C = juce::dsp::Complex<float>;
+        std::vector<C> a ((size_t) m), b ((size_t) m);
+
+        // calibrate inverse scaling of the complex transform
+        std::fill (a.begin(), a.end(), C {});
+        a[0] = 1.0f;
+        fft.perform (a.data(), b.data(), false);
+        fft.perform (b.data(), a.data(), true);
+        const float inv = a[0].real() != 0.0f ? 1.0f / a[0].real() : 1.0f;
+
+        for (int k = 0; k < m; ++k)
+        {
+            const int kk = k <= m / 2 ? k : m - k;
+            const double mag = std::max (1.0e-5, (double) std::abs (magAtHz (kk * rate / m)));
+            a[(size_t) k] = C ((float) std::log (mag), 0.0f);
+        }
+        fft.perform (a.data(), b.data(), true); // real cepstrum
+        for (int i = 0; i < m; ++i)
+        {
+            float c = b[(size_t) i].real() * inv;
+            if (i > 0 && i < m / 2) c *= 2.0f;
+            else if (i > m / 2) c = 0.0f;
+            a[(size_t) i] = C (c, 0.0f);
+        }
+        fft.perform (a.data(), b.data(), false);
+        for (int k = 0; k < m; ++k)
+            a[(size_t) k] = std::exp (b[(size_t) k]);
+        fft.perform (a.data(), b.data(), true);
+
+        std::vector<float> fir ((size_t) n);
+        const int fadeStart = n - n / 4;
+        for (int i = 0; i < n; ++i)
+        {
+            float w = 1.0f;
+            if (i >= fadeStart)
+                w = 0.5f + 0.5f * std::cos ((float) pi * (float) (i - fadeStart) / (float) (n - fadeStart));
+            fir[(size_t) i] = b[(size_t) i].real() * inv * w;
+        }
+        return fir;
+    }
+} // namespace
+
 std::vector<float> designFir (const std::vector<float>& curve, double curveRate, int curveFft,
-                              double firRate, int n, float amount, float maxBoostDb)
+                              double firRate, int n, float amount, float maxBoostDb, bool minimumPhase)
 {
     juce::dsp::FFT fft (orderFor (n));
     std::vector<float> buf ((size_t) n * 2, 0.0f);
@@ -484,11 +561,11 @@ std::vector<float> designFir (const std::vector<float>& curve, double curveRate,
     const int last = (int) curve.size() - 1;
     const float maxLin = maxBoostDb > 0.0f ? juce::Decibels::decibelsToGain (maxBoostDb) : 0.0f;
 
-    auto magAt = [&] (int k) -> float
+    auto magAt = [&] (double k) -> float
     {
         if (amount <= 0.0f)
             return 1.0f;
-        const double pos = (double) k * firRate / (double) n / binHz;
+        const double pos = k * firRate / (double) n / binHz;
         float v;
         if (pos >= last)
             v = curve[(size_t) last];
@@ -504,6 +581,9 @@ std::vector<float> designFir (const std::vector<float>& curve, double curveRate,
             v = std::copysign (std::clamp (std::abs (v), 1.0f / maxLin, maxLin), v);
         return v;
     };
+
+    if (minimumPhase)
+        return minimumPhaseFir ([&] (double hz) { return magAt (hz * (double) n / firRate); }, firRate, n);
 
     for (int k = 0; k <= n / 2; ++k)
     {
@@ -616,6 +696,66 @@ juce::AudioBuffer<float> toStereoAtRate (const juce::AudioBuffer<float>& in, dou
         interp.process (ratio, src.getReadPointer (ch), out.getWritePointer (ch), nOut);
     }
     return out;
+}
+
+double lowessFracForSmoothing (double amount01)
+{
+    const double a = std::clamp (amount01, 0.0, 1.0);
+    return 0.0375 * std::pow (0.3 / 0.0375, a); // 0.0375 (Matchering) .. 0.3 (broad tilt)
+}
+
+// Heuristic: compares the reference's averaged spectrum with a typical mastered-music slope.
+juce::String describeReference (const ReferenceProfile& ref, const Config& cfg)
+{
+    if (! ref.isValid())
+        return {};
+
+    const double binHz = cfg.sampleRate / cfg.fftSize;
+    auto bandDb = [&] (const std::vector<double>& spec, double lo, double hi)
+    {
+        double acc = 0.0;
+        int n = 0;
+        for (size_t k = 1; k < spec.size(); ++k)
+        {
+            const double f = (double) k * binHz;
+            if (f >= lo && f < hi) { acc += spec[k] * spec[k]; ++n; }
+        }
+        return 10.0 * std::log10 (acc / std::max (1, n) + 1e-30);
+    };
+
+    // per-bin power slope (dB/octave) over 150 Hz .. 6 kHz
+    double sx = 0, sy = 0, sxx = 0, sxy = 0;
+    int cnt = 0;
+    for (double f = 150.0; f < 6000.0; f *= 1.25)
+    {
+        const double x = std::log2 (f), y = bandDb (ref.midSpectrum, f / 1.12, f * 1.12);
+        sx += x; sy += y; sxx += x * x; sxy += x * y; ++cnt;
+    }
+    const double slope = (cnt * sxy - sx * sy) / (cnt * sxx - sx * sx);
+    const double icept = (sy - slope * sx) / cnt;
+    auto predicted = [&] (double f) { return icept + slope * std::log2 (f); };
+
+    const double lowExcess = bandDb (ref.midSpectrum, 40, 120) - predicted (70);
+    const double airExcess = bandDb (ref.midSpectrum, 10000, 16000) - predicted (12500);
+    const double widthDb = bandDb (ref.sideSpectrum, 200, 8000) - bandDb (ref.midSpectrum, 200, 8000);
+    const double crestDb = juce::Decibels::gainToDecibels (ref.peak / std::max (1e-9, ref.matchRms * ref.finalAmplitudeCoef));
+
+    struct Candidate { const char* word; double score; };
+    const Candidate c[] = {
+        { "Bright",   (slope + 4.5) / 1.2 },
+        { "Warm",     -(slope + 4.5) / 1.2 },
+        { "Heavy",    (lowExcess - 3.0) / 3.0 },
+        { "Airy",     (airExcess - 2.0) / 3.0 },
+        { "Wide",     (widthDb + 9.0) / 3.0 },
+        { "Focused",  -(widthDb + 20.0) / 3.0 },
+        { "Loud",     -(crestDb - 9.0) / 1.5 },
+        { "Dynamic",  (crestDb - 14.0) / 2.0 },
+    };
+    const Candidate* best = nullptr;
+    for (const auto& x : c)
+        if (x.score > 0.0 && (best == nullptr || x.score > best->score))
+            best = &x;
+    return best != nullptr ? juce::String (best->word) : juce::String ("Balanced");
 }
 
 } // namespace mm

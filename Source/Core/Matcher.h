@@ -42,7 +42,7 @@ struct ReferenceProfile
 // Target analysis (keeps the mid signal for the RMS-correction passes).
 struct TargetProfile
 {
-    std::vector<float> mid;                          // mid channel @ config rate
+    std::vector<float> mid, side;                    // mid/side channels @ config rate
     std::vector<double> midSpectrum, sideSpectrum;   // raw (un-amplified) averaged |FFT|
     double matchRms = 0.0;
     int pieceSize = 0, divisions = 0;
@@ -53,6 +53,9 @@ struct TargetProfile
 struct MatchResult
 {
     std::vector<float> midCurve, sideCurve; // smoothed linear EQ magnitude, numBins() points over 0..sr/2
+    std::vector<double> midMatching, sideMatching; // raw (unsmoothed) reference / track ratios, for re-smoothing
+    double trackPeakDb = 0.0;               // true peak of the learned track
+    double eqPeakDb = 0.0;                  // true peak of the learned track after the matching EQ (unity gain)
     double rmsCoefficient = 1.0;            // loudness match (stage 1)
     double correctionGain = 1.0;            // product of RMS correction steps (stage 3)
     double finalAmplitudeCoef = 1.0;        // reference peak level, applied after the limiter
@@ -71,8 +74,10 @@ MatchResult      match            (const TargetProfile& target, const ReferenceP
 // Design a linear-phase FIR (length firSize, peak at firSize/2) from a matching curve.
 // amount scales the curve in the log domain (0 = flat, 1 = exact Matchering curve).
 // maxBoostDb limits boosts/cuts as a real-time safety net (<= 0 disables the limit).
+// minimumPhase = "Natural" mode: no pre-echo and no latency (peak at index 0) instead of linear phase.
 std::vector<float> designFir (const std::vector<float>& curve, double curveSampleRate, int curveFftSize,
-                              double firSampleRate, int firSize, float amount, float maxBoostDb);
+                              double firSampleRate, int firSize, float amount, float maxBoostDb,
+                              bool minimumPhase = false);
 
 // Linear-phase FIR length used at a given host rate (>= Matchering's 4096 @ 44.1k resolution).
 int firSizeForRate (double sampleRate);
@@ -82,6 +87,12 @@ juce::AudioBuffer<float> toStereoAtRate (const juce::AudioBuffer<float>& in, dou
 
 // Same-mode FFT convolution (scipy.signal.fftconvolve(..., "same")).
 std::vector<float> convolveSame (const std::vector<float>& x, const std::vector<float>& h);
+
+// One word describing a reference's character ("Bright", "Warm", "Wide", "Loud", ...).
+juce::String describeReference (const ReferenceProfile& ref, const Config& cfg);
+
+// LOWESS fraction for a smoothing amount 0..1 (0 = Matchering's 0.0375, 1 = very broad).
+double lowessFracForSmoothing (double amount01);
 
 // Exposed for tests.
 std::vector<double> lowess (const std::vector<double>& x, const std::vector<double>& y, double frac, double delta);

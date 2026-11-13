@@ -1,7 +1,6 @@
 #include "PluginEditor.h"
 
 using namespace ui;
-using Phase = MatchMasterProcessor::Phase;
 
 // ================================================================== LookAndFeel
 
@@ -82,51 +81,52 @@ juce::Font LookAndFeel::getTextButtonFont (juce::TextButton&, int h)
     return juce::FontOptions (juce::jmin (14.0f, h * 0.5f), juce::Font::bold);
 }
 
-// ================================================================== DropZone
+// ================================================================== DropZone (reference slot)
+
+DropZone::DropZone()
+{
+    flavour.setEditable (false, true, false);
+    flavour.setJustificationType (juce::Justification::centredLeft);
+    flavour.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    flavour.setColour (juce::Label::textColourId, colours::accent);
+    flavour.setTooltip ("Double-click to rename");
+    flavour.onTextChange = [this] { if (onFlavour) onFlavour (flavour.getText()); };
+    addAndMakeVisible (flavour);
+}
+
+void DropZone::setFlavour (const juce::String& f)
+{
+    if (! flavour.isBeingEdited() && flavour.getText() != f)
+        flavour.setText (f, juce::dontSendNotification);
+}
+
+void DropZone::resized()
+{
+    flavour.setBounds (getLocalBounds().reduced (8, 8).removeFromBottom (20));
+}
 
 void DropZone::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat().reduced (1.0f);
-    const bool hot = dragOver || isMouseOver();
-    g.setColour (hot ? colours::panel.brighter (0.06f) : colours::panel);
-    g.fillRoundedRectangle (r, 10.0f);
+    const bool hot = dragOver || isMouseOver (true);
+    g.setColour (selected ? colours::panel.brighter (0.1f) : hot ? colours::panel.brighter (0.05f) : colours::panel);
+    g.fillRoundedRectangle (r, 8.0f);
+    g.setColour (selected ? colours::accent : dragOver ? colours::accent.withAlpha (0.6f) : colours::line);
+    g.drawRoundedRectangle (r, 8.0f, selected ? 2.0f : 1.0f);
 
-    juce::Path border;
-    border.addRoundedRectangle (r, 10.0f);
-    if (fileName.isEmpty())
-    {
-        const float dashes[] = { 6.0f, 4.0f };
-        juce::Path dashed;
-        juce::PathStrokeType (1.5f).createDashedStroke (dashed, border, dashes, 2);
-        g.setColour (hot ? colours::accent : colours::dim.withAlpha (0.6f));
-        g.fillPath (dashed);
-    }
-    else
-    {
-        g.setColour (colours::accent.withAlpha (0.7f));
-        g.strokePath (border, juce::PathStrokeType (1.5f));
-    }
+    auto inner = getLocalBounds().reduced (10, 8);
+    g.setColour (selected ? colours::accent : colours::dim);
+    g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+    g.drawText (letter, inner.removeFromTop (22), juce::Justification::left);
 
-    auto inner = getLocalBounds().reduced (16, 12);
-    g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-    g.drawText ("1  REFERENCE", inner.removeFromTop (16), juce::Justification::left);
-
-    g.setColour (colours::text);
-    g.setFont (juce::FontOptions (16.0f, juce::Font::bold));
-    const auto title = busy ? juce::String ("Analysing...") : fileName.isEmpty() ? juce::String ("Drop a mastered song") : fileName;
-    g.drawFittedText (title, inner.removeFromTop (inner.getHeight() / 2 + 6), juce::Justification::bottomLeft, 2);
-
-    g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (12.0f));
-    g.drawText (fileName.isEmpty() ? "or click to browse  (wav, aiff, flac, mp3)" : "click or drop to change",
-                inner, juce::Justification::topLeft);
+    g.setColour (loaded ? colours::text : colours::dim);
+    g.setFont (juce::FontOptions (12.0f, loaded ? juce::Font::bold : juce::Font::plain));
+    const auto title = busy ? juce::String ("Analysing...") : loaded ? fileName : juce::String ("Drop or click\nto load a song");
+    g.drawFittedText (title, inner.withTrimmedBottom (22), juce::Justification::topLeft, 3);
 }
 
-void DropZone::mouseUp (const juce::MouseEvent& e)
+void DropZone::browse()
 {
-    if (! getLocalBounds().contains (e.getPosition()))
-        return;
     chooser = std::make_unique<juce::FileChooser> ("Choose a reference song", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.m4a;*.ogg");
     chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
                           [this] (const juce::FileChooser& fc)
@@ -134,6 +134,16 @@ void DropZone::mouseUp (const juce::MouseEvent& e)
                               if (fc.getResult().existsAsFile() && onFile)
                                   onFile (fc.getResult());
                           });
+}
+
+void DropZone::mouseUp (const juce::MouseEvent& e)
+{
+    if (! getLocalBounds().contains (e.getPosition()))
+        return;
+    if (! loaded || e.mods.isPopupMenu())
+        browse(); // empty slot or right-click: load a file
+    else if (onSelect)
+        onSelect();
 }
 
 void DropZone::filesDropped (const juce::StringArray& files, int, int)
@@ -148,57 +158,36 @@ void DropZone::filesDropped (const juce::StringArray& files, int, int)
 
 bool LearnButton::isEnabledForClick() const
 {
-    return phase == Phase::readyToLearn || phase == Phase::matched || phase == Phase::listening;
+    return state != MatchMasterProcessor::LearnState::analysing;
 }
 
 void LearnButton::paint (juce::Graphics& g)
 {
+    using LS = MatchMasterProcessor::LearnState;
     auto r = getLocalBounds().toFloat().reduced (1.0f);
-    const bool enabled = isEnabledForClick();
-    const bool listening = phase == Phase::listening;
+    const bool listening = state == LS::listening;
 
-    g.setColour (listening ? colours::rec.withAlpha (0.16f) : colours::panel.brighter (enabled && isMouseOver() ? 0.06f : 0.0f));
-    g.fillRoundedRectangle (r, 10.0f);
-    g.setColour (listening ? colours::rec : enabled ? colours::line.brighter (0.3f) : colours::line);
-    g.drawRoundedRectangle (r, 10.0f, 1.5f);
+    g.setColour (listening ? colours::rec.withAlpha (0.16f) : colours::panel.brighter (isMouseOver() ? 0.06f : 0.0f));
+    g.fillRoundedRectangle (r, 8.0f);
+    g.setColour (listening ? colours::rec : colours::line.brighter (0.3f));
+    g.drawRoundedRectangle (r, 8.0f, 1.5f);
 
-    auto inner = getLocalBounds().reduced (16, 10);
-    g.setColour (colours::dim);
-    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-    g.drawText ("2  LEARN YOUR TRACK", inner.removeFromTop (16), juce::Justification::left);
+    auto inner = getLocalBounds().reduced (14, 0);
+    auto icon = inner.removeFromLeft (26).toFloat().withSizeKeepingCentre (16, 16);
+    g.setColour (listening ? colours::rec.withAlpha (0.55f + 0.45f * pulse) : colours::rec);
+    if (listening) g.fillRoundedRectangle (icon.reduced (1), 2.0f);
+    else g.fillEllipse (icon);
 
-    // icon
-    auto icon = inner.removeFromLeft (28).toFloat().withSizeKeepingCentre (18, 18);
-    if (listening)
-    {
-        g.setColour (colours::rec.withAlpha (0.55f + 0.45f * pulse));
-        g.fillRoundedRectangle (icon.reduced (2), 2.0f);
-    }
-    else
-    {
-        g.setColour (enabled ? colours::rec : colours::dim.withAlpha (0.4f));
-        g.fillEllipse (icon);
-    }
-
-    juce::String text;
-    if (listening)
-        text = "Stop  " + juce::String ((int) seconds / 60) + ":" + juce::String ((int) seconds % 60).paddedLeft ('0', 2);
-    else if (phase == Phase::analysingTrack)
-        text = "Matching...";
-    else if (phase == Phase::matched)
-        text = "Re-learn";
-    else
-        text = "Learn";
-
-    g.setColour (enabled || phase == Phase::analysingTrack ? colours::text : colours::dim.withAlpha (0.5f));
-    g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+    juce::String text = listening ? "Stop  " + juce::String ((int) seconds / 60) + ":" + juce::String ((int) seconds % 60).paddedLeft ('0', 2)
+                      : state == LS::analysing ? juce::String ("Matching...")
+                      : learned ? juce::String ("Re-learn your track") : juce::String ("Learn your track");
+    g.setColour (colours::text);
+    g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
     g.drawText (text, inner, juce::Justification::centredLeft);
 
     if (listening)
     {
-        auto bar = getLocalBounds().toFloat().reduced (12, 0).removeFromBottom (5).translated (0, -6);
-        g.setColour (colours::line);
-        g.fillRoundedRectangle (bar, 2.0f);
+        auto bar = getLocalBounds().toFloat().reduced (10, 0).removeFromBottom (4).translated (0, -4);
         g.setColour (colours::rec);
         g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * (float) juce::jlimit (0.0, 1.0, seconds / maxSeconds)), 2.0f);
     }
@@ -253,7 +242,7 @@ void CurveView::paint (juce::Graphics& g)
             const double pos = f / binHz;
             const int i0 = juce::jlimit (0, (int) c.size() - 2, (int) pos);
             const float v = c[(size_t) i0] + (float) (pos - i0) * (c[(size_t) i0 + 1] - c[(size_t) i0]);
-            const float db = juce::jlimit (-24.0f, 24.0f, 20.0f * std::log10 (juce::jmax (1.0e-4f, std::abs (v)))) * amt;
+            const float db = juce::jlimit (-maxCorr, maxCorr, 20.0f * std::log10 (juce::jmax (1.0e-4f, std::abs (v))) * amt);
             const float x = plot.getX() + (float) px, y = yFor (db);
             if (px == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
         }
@@ -312,13 +301,20 @@ void Meter::paint (juce::Graphics& g)
 MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorEditor (p), proc (p)
 {
     setLookAndFeel (&lnf);
-
-    dropZone.onFile = [this] (const juce::File& f) { proc.loadReference (f); };
-    addAndMakeVisible (dropZone);
+    const char* letters[] = { "A", "B", "C" };
+    for (int i = 0; i < MatchMasterProcessor::numSlots; ++i)
+    {
+        auto& z = slotZones[(size_t) i];
+        z.letter = letters[i];
+        z.onFile = [this, i] (const juce::File& f) { proc.loadReference (i, f); };
+        z.onSelect = [this, i] { proc.selectSlot (i); };
+        z.onFlavour = [this, i] (const juce::String& w) { proc.setFlavour (i, w); };
+        addAndMakeVisible (z);
+    }
 
     learnButton.onClick = [this]
     {
-        if (proc.getPhase() == Phase::listening) proc.stopLearning();
+        if (proc.getLearnState() == MatchMasterProcessor::LearnState::listening) proc.stopLearning();
         else proc.startLearning();
     };
     addAndMakeVisible (learnButton);
@@ -333,8 +329,7 @@ MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorE
         s.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
         s.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         s.setRotaryParameters (juce::degreesToRadians (225.0f), juce::degreesToRadians (495.0f), true);
-        s.setTextBoxStyle (big ? juce::Slider::NoTextBox : juce::Slider::TextBoxBelow, false, 70, 18);
-        s.setDoubleClickReturnValue (true, 100.0);
+        s.setTextBoxStyle (big ? juce::Slider::NoTextBox : juce::Slider::TextBoxBelow, false, 80, 18);
         addAndMakeVisible (s);
         l.setText (name, juce::dontSendNotification);
         l.setJustificationType (juce::Justification::centred);
@@ -346,12 +341,43 @@ MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorE
     setupKnob (midKnob, midLabel, "MID EQ", false);
     setupKnob (sideKnob, sideLabel, "SIDE EQ", false);
     setupKnob (loudKnob, loudLabel, "LOUDNESS", false);
+    setupKnob (smoothKnob, smoothLabel, "SMOOTHING", false);
+    setupKnob (corrKnob, corrLabel, "MAX CORR.", false);
     sideKnob.getProperties().set ("side", true);
 
-    matchAtt = std::make_unique<Attachment> (proc.apvts, "match", matchKnob);
-    midAtt = std::make_unique<Attachment> (proc.apvts, "midEq", midKnob);
-    sideAtt = std::make_unique<Attachment> (proc.apvts, "sideEq", sideKnob);
-    loudAtt = std::make_unique<Attachment> (proc.apvts, "loudness", loudKnob);
+    auto& vts = proc.apvts;
+    matchAtt = std::make_unique<Attachment> (vts, "match", matchKnob);
+    midAtt = std::make_unique<Attachment> (vts, "midEq", midKnob);
+    sideAtt = std::make_unique<Attachment> (vts, "sideEq", sideKnob);
+    loudAtt = std::make_unique<Attachment> (vts, "loudness", loudKnob);
+    smoothAtt = std::make_unique<Attachment> (vts, "smoothing", smoothKnob);
+    corrAtt = std::make_unique<Attachment> (vts, "maxCorr", corrKnob);
+
+    eqMode.addItemList ({ "EQ: Linear phase", "EQ: Natural (no pre-echo)" }, 1);
+    addAndMakeVisible (eqMode);
+    modeAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (vts, "eqMode", eqMode);
+
+    // limiter strip
+    for (auto* b : { &limiterButton, &truePeakButton })
+    {
+        b->setColour (juce::ToggleButton::tickColourId, colours::accent);
+        b->setColour (juce::ToggleButton::textColourId, colours::text);
+        addAndMakeVisible (b);
+    }
+    limiterAtt = std::make_unique<ButtonAtt> (vts, "limiter", limiterButton);
+    truePeakAtt = std::make_unique<ButtonAtt> (vts, "truePeak", truePeakButton);
+    ceilingSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    ceilingSlider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 70, 20);
+    ceilingSlider.setColour (juce::Slider::trackColourId, colours::accent);
+    ceilingSlider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    addAndMakeVisible (ceilingSlider);
+    ceilingAtt = std::make_unique<Attachment> (vts, "ceiling", ceilingSlider);
+    ceilingLabel.setText ("Ceiling", juce::dontSendNotification);
+    ceilingLabel.setColour (juce::Label::textColourId, colours::dim);
+    addAndMakeVisible (ceilingLabel);
+    limiterReadout.setFont (juce::FontOptions (12.0f));
+    limiterReadout.setJustificationType (juce::Justification::centredLeft);
+    addAndMakeVisible (limiterReadout);
 
     addAndMakeVisible (meter);
 
@@ -361,7 +387,7 @@ MatchMasterEditor::MatchMasterEditor (MatchMasterProcessor& p) : AudioProcessorE
 
     readout.setFont (juce::FontOptions (12.0f));
     readout.setColour (juce::Label::textColourId, colours::dim);
-    readout.setJustificationType (juce::Justification::centredLeft);
+    readout.setJustificationType (juce::Justification::topLeft);
     addChildComponent (readout);
     addChildComponent (curve);
 
@@ -377,7 +403,8 @@ MatchMasterEditor::~MatchMasterEditor()
 void MatchMasterEditor::setAdvanced (bool on)
 {
     advanced = on;
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &curve, &midKnob, &sideKnob, &loudKnob, &midLabel, &sideLabel, &loudLabel, &readout })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &curve, &midKnob, &sideKnob, &loudKnob, &smoothKnob, &corrKnob,
+                                                                        &midLabel, &sideLabel, &loudLabel, &smoothLabel, &corrLabel, &readout, &eqMode })
         c->setVisible (on);
     setSize (width, on ? advancedHeight : simpleHeight);
 }
@@ -394,6 +421,7 @@ void MatchMasterEditor::paint (juce::Graphics& g)
     g.drawText ("reference mastering", header.withTrimmedLeft (156), juce::Justification::centredLeft);
     g.setColour (colours::line);
     g.drawHorizontalLine (56, 0.0f, (float) getWidth());
+    g.drawHorizontalLine (simpleHeight - 64, 20.0f, (float) getWidth() - 20.0f);
     if (advanced)
         g.drawHorizontalLine (simpleHeight, 20.0f, (float) getWidth() - 20.0f);
 }
@@ -404,31 +432,48 @@ void MatchMasterEditor::resized()
     auto header = r.removeFromTop (56).reduced (20, 14);
     advancedButton.setBounds (header.removeFromRight (100));
 
-    auto top = r.removeFromTop (simpleHeight - 56).reduced (20, 18);
-    auto left = top.removeFromLeft (270);
-    dropZone.setBounds (left.removeFromTop (112));
+    auto main = r.removeFromTop (simpleHeight - 56 - 64).reduced (20, 16);
+    auto left = main.removeFromLeft (360);
+    auto slotsRow = left.removeFromTop (130);
+    const int w = (slotsRow.getWidth() - 16) / 3;
+    for (auto& z : slotZones)
+    {
+        z.setBounds (slotsRow.removeFromLeft (w));
+        slotsRow.removeFromLeft (8);
+    }
     left.removeFromTop (12);
-    learnButton.setBounds (left.removeFromTop (92));
-    left.removeFromTop (10);
+    learnButton.setBounds (left.removeFromTop (52));
+    left.removeFromTop (8);
     messageLabel.setBounds (left);
 
-    meter.setBounds (top.removeFromRight (54));
-    top.removeFromRight (10);
-    auto knobArea = top.reduced (10, 0);
+    meter.setBounds (main.removeFromRight (54));
+    main.removeFromRight (10);
+    auto knobArea = main.reduced (6, 0);
     matchLabel.setBounds (knobArea.removeFromBottom (22));
     matchKnob.setBounds (knobArea);
 
+    auto strip = r.removeFromTop (64).reduced (20, 16);
+    limiterButton.setBounds (strip.removeFromLeft (90));
+    truePeakButton.setBounds (strip.removeFromLeft (100));
+    ceilingLabel.setBounds (strip.removeFromLeft (56));
+    ceilingSlider.setBounds (strip.removeFromLeft (190));
+    strip.removeFromLeft (12);
+    limiterReadout.setBounds (strip);
+
     if (advanced)
     {
-        auto adv = r.reduced (20, 16);
-        curve.setBounds (adv.removeFromTop (180));
-        adv.removeFromTop (14);
-        auto row = adv;
-        readout.setBounds (row.removeFromRight (190));
-        for (const auto& pair : { std::pair<juce::Slider*, juce::Label*> { &midKnob, &midLabel },
-                            { &sideKnob, &sideLabel }, { &loudKnob, &loudLabel } })
+        auto adv = r.reduced (20, 14);
+        auto top = adv.removeFromTop (24);
+        eqMode.setBounds (top.removeFromLeft (220));
+        adv.removeFromTop (8);
+        curve.setBounds (adv.removeFromTop (170));
+        adv.removeFromTop (10);
+        readout.setBounds (adv.removeFromRight (150));
+        const int cw = adv.getWidth() / 5;
+        for (const auto& pair : { std::pair<juce::Slider*, juce::Label*> { &midKnob, &midLabel }, { &sideKnob, &sideLabel },
+                                  { &loudKnob, &loudLabel }, { &smoothKnob, &smoothLabel }, { &corrKnob, &corrLabel } })
         {
-            auto cell = row.removeFromLeft (120).reduced (6, 0);
+            auto cell = adv.removeFromLeft (cw).reduced (4, 0);
             pair.second->setBounds (cell.removeFromTop (16));
             pair.first->setBounds (cell);
         }
@@ -437,14 +482,22 @@ void MatchMasterEditor::resized()
 
 void MatchMasterEditor::timerCallback()
 {
-    const auto phase = proc.getPhase();
     const auto snap = proc.getSnapshot();
+    const int active = proc.getActiveSlot();
+    for (int i = 0; i < MatchMasterProcessor::numSlots; ++i)
+    {
+        auto& z = slotZones[(size_t) i];
+        const auto& info = snap.slots[(size_t) i];
+        z.fileName = info.name;
+        z.loaded = info.loaded;
+        z.busy = info.busy;
+        z.selected = i == active;
+        z.setFlavour (info.loaded && ! info.busy ? info.flavour : juce::String());
+        z.repaint();
+    }
 
-    dropZone.fileName = snap.referenceName;
-    dropZone.busy = phase == Phase::analysingReference;
-    dropZone.repaint();
-
-    learnButton.phase = phase;
+    learnButton.state = proc.getLearnState();
+    learnButton.learned = proc.hasLearnedTrack();
     learnButton.seconds = proc.getCaptureSeconds();
     learnButton.maxSeconds = proc.getMaxCaptureSeconds();
     learnButton.pulse = 0.5f + 0.5f * std::sin ((float) juce::Time::getMillisecondCounter() * 0.006f);
@@ -455,8 +508,24 @@ void MatchMasterEditor::timerCallback()
 
     meter.l = proc.meterL.load();
     meter.r = proc.meterR.load();
-    meter.gr = proc.meterGr.exchange (1.0f);
+    const float gr = proc.meterGr.exchange (1.0f);
+    meter.gr = gr;
     meter.repaint();
+
+    auto fmt = [] (double db) { return (db >= 0 ? "+" : "") + juce::String (db, 1) + " dB"; };
+    const bool limOn = limiterButton.getToggleState();
+    truePeakButton.setEnabled (limOn);
+    juce::String lim;
+    if (limOn)
+        lim = "Gain reduction  now " + juce::String (-juce::Decibels::gainToDecibels (gr, -60.0f), 1)
+              + " dB   max " + juce::String (proc.maxGrDb.load(), 1) + " dB";
+    else if (proc.suggestionDb.load() > 0.05f)
+        lim = "To match the reference: " + fmt (proc.suggestionDb.load()) + " into your limiter, ceiling "
+              + juce::String (ceilingSlider.getValue(), 1) + " dBTP";
+    else
+        lim = "Limiter off - output kept under the ceiling";
+    limiterReadout.setText (lim, juce::dontSendNotification);
+    limiterReadout.setColour (juce::Label::textColourId, limOn ? colours::dim : colours::accent);
 
     if (advanced)
     {
@@ -464,13 +533,13 @@ void MatchMasterEditor::timerCallback()
         curve.snap = snap;
         curve.midAmt = match * (float) midKnob.getValue() * 0.01f;
         curve.sideAmt = match * (float) sideKnob.getValue() * 0.01f;
+        curve.maxCorr = (float) corrKnob.getValue();
         curve.repaint();
 
         const bool has = ! snap.midCurve.empty();
-        auto fmt = [] (double db) { return (db >= 0 ? "+" : "") + juce::String (db, 1) + " dB"; };
-        readout.setText (has ? "Loudness match  " + fmt (snap.gainDb * match * loudKnob.getValue() * 0.01)
-                                   + "\nReference level  " + fmt (snap.refLevelDb * match)
-                                   + "\nLatency  " + juce::String (juce::roundToInt (proc.getLatencySamples() * 1000.0 / juce::jmax (1.0, proc.getSampleRate()))) + " ms"
+        readout.setText (has ? "Loudness match\n" + fmt (snap.gainDb * match * loudKnob.getValue() * 0.01)
+                                   + "\nReference level\n" + fmt (snap.refLevelDb * match)
+                                   + "\nLatency\n" + juce::String (juce::roundToInt (proc.getLatencySamples() * 1000.0 / juce::jmax (1.0, proc.getSampleRate()))) + " ms"
                              : juce::String ("Learn your track to see the match"),
                          juce::dontSendNotification);
     }

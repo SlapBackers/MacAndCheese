@@ -5,6 +5,7 @@
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Core/TruePeak.h"
 #include <iostream>
 #include <random>
 
@@ -28,16 +29,6 @@ juce::AudioBuffer<float> makeSong (double rate, double seconds, float tilt, floa
         b.setSample (1, i, lpR * env);
     }
     return b;
-}
-
-bool waitFor (MatchMasterProcessor& p, MatchMasterProcessor::Phase want, int ms)
-{
-    for (int t = 0; t < ms; t += 50)
-    {
-        if (p.getPhase() == want) return true;
-        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
-    }
-    return p.getPhase() == want;
 }
 
 void playThrough (MatchMasterProcessor& p, const juce::AudioBuffer<float>& in, juce::AudioBuffer<float>* out)
@@ -102,101 +93,123 @@ int main (int argc, char* argv[])
     int failures = 0;
     auto check = [&] (bool ok, const juce::String& what) { std::cout << (ok ? "  PASS  " : "  FAIL  ") << what << "\n"; if (! ok) ++failures; };
 
-    using Phase = MatchMasterProcessor::Phase;
+    using LS = MatchMasterProcessor::LearnState;
     const double rate = 48000;
     auto proc = std::make_unique<MatchMasterProcessor>();
     proc->setPlayConfigDetails (2, 2, rate, 512);
     proc->prepareToPlay (rate, 512);
-    const int latency = proc->getLatencySamples();
-    std::cout << "  info  latency " << latency << " samples (" << latency * 1000.0 / rate << " ms)\n";
+    auto pump = [] (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); };
+    pump (200);
+    int latency = proc->getLatencySamples();
+    std::cout << "  info  latency (linear EQ) " << latency << " samples (" << latency * 1000.0 / rate << " ms)\n";
 
     auto editor = std::unique_ptr<juce::AudioProcessorEditor> (proc->createEditor());
     snapshot (*editor, outDir.getChildFile ("1-start.png"));
 
-    // Step 1-2: reference file
-    auto ref = makeSong (44100, 45, 0.6f, 0.30f, 0.5f, 2);
-    const auto refFile = outDir.getChildFile ("test-reference.wav");
+    auto writeWav = [&] (const juce::AudioBuffer<float>& b, double r, const juce::String& name)
     {
-        refFile.deleteFile();
+        auto f = outDir.getChildFile (name);
+        f.deleteFile();
         juce::WavAudioFormat wav;
-        std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (new juce::FileOutputStream (refFile), 44100, 2, 24, {}, 0));
-        w->writeFromAudioSampleBuffer (ref, 0, ref.getNumSamples());
-    }
-    proc->loadReference (refFile);
-    check (waitFor (*proc, Phase::readyToLearn, 20000), "reference analysed -> ready to learn");
+        std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (new juce::FileOutputStream (f), r, 2, 24, {}, 0));
+        w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+        return f;
+    };
+    auto refBright = makeSong (44100, 45, 0.6f, 0.30f, 0.5f, 2);
+    auto refWarm = makeSong (44100, 45, 0.15f, 0.25f, 0.1f, 3);
+    proc->loadReference (0, writeWav (refBright, 44100, "bright-ref.wav"));
+    proc->loadReference (1, writeWav (refWarm, 44100, "warm-ref.wav"));
+    auto waitSlots = [&] { for (int t = 0; t < 400; ++t) { auto s = proc->getSnapshot(); if (s.slots[0].loaded && s.slots[1].loaded && ! s.slots[0].busy && ! s.slots[1].busy) return true; pump (50); } return false; };
+    check (waitSlots(), "two references analysed into A and B");
+    const auto snap0 = proc->getSnapshot();
+    std::cout << "  info  flavours: A = " << snap0.slots[0].flavour << ", B = " << snap0.slots[1].flavour << "\n";
 
-    // Before matching: transparent apart from the delay
     auto track = makeSong (rate, 40, 0.08f, 0.05f, 0.2f, 1);
+    auto transparency = [&]
     {
         juce::AudioBuffer<float> out (2, track.getNumSamples());
         out.clear();
+        playThrough (*proc, track, nullptr);
         playThrough (*proc, track, &out);
         double err = 0;
         for (int i = latency + 1000; i < track.getNumSamples() - 1000; ++i)
             err = std::max (err, (double) std::abs (out.getSample (0, i) - track.getSample (0, i - latency)));
-        check (err < 1e-3, "unmatched plugin is transparent (max diff " + juce::String (err, 6) + ")");
-    }
+        return err;
+    };
+    check (transparency() < 1e-3, "unmatched plugin is transparent");
 
-    // Step 3: Learn
+    proc->selectSlot (0);
     proc->startLearning();
-    check (proc->getPhase() == Phase::listening, "Learn starts listening");
+    check (proc->getLearnState() == LS::listening, "Learn starts listening");
     playThrough (*proc, track, nullptr);
-    editor->setSize (editor->getWidth(), editor->getHeight());
-    juce::MessageManager::getInstance()->runDispatchLoopUntil (100);
+    pump (100);
     snapshot (*editor, outDir.getChildFile ("2-listening.png"));
     proc->stopLearning();
-    check (waitFor (*proc, Phase::matched, 30000), "track learned -> matched");
-    juce::MessageManager::getInstance()->runDispatchLoopUntil (500); // FIR swap + crossfade
+    bool done = false;
+    for (int t = 0; t < 600 && ! done; ++t) { auto s = proc->getSnapshot(); done = proc->getLearnState() == LS::idle && s.slots[0].matched && s.slots[1].matched; pump (50); }
+    check (done, "one Learn matched both profiles");
+    pump (500);
 
-    // Matched playback
+    auto measure = [&] (const juce::String& label)
     {
-        playThrough (*proc, track, nullptr); // let gain smoothing / IR crossfade settle
+        playThrough (*proc, track, nullptr);
         juce::AudioBuffer<float> out (2, track.getNumSamples());
-        out.clear();
         playThrough (*proc, track, &out);
-        const int s = (int) (rate * 10), len = (int) (rate * 8); // a loud section
-        const double refDb = rmsDb (ref, (int) (44100 * 10), (int) (44100 * 8));
-        const double inDb = rmsDb (track, s, len), outDb = rmsDb (out, s + latency, len);
-        std::cout << "  info  loud section RMS: track " << inDb << " dB -> plugin output " << outDb << " dB (reference " << refDb << " dB)\n";
-        {
-            mm::Config cfg;
-            juce::AudioBuffer<float> aligned (2, out.getNumSamples() - latency);
-            for (int ch = 0; ch < 2; ++ch) aligned.copyFrom (ch, 0, out, ch, latency, aligned.getNumSamples());
-            const auto o = mm::analyzeTarget (mm::toStereoAtRate (aligned, rate, 44100), cfg);
-            const auto r = mm::analyzeReference (mm::toStereoAtRate (ref, 44100, 44100), cfg);
-            const double oDb = 20 * std::log10 (o.matchRms), rDb = 20 * std::log10 (r.matchRms * r.finalAmplitudeCoef);
-            auto msDb = [] (const juce::AudioBuffer<float>& b, int st, int n, bool side) {
-                double a = 0; for (int i = st; i < st + n; ++i) { const double m = 0.5 * (b.getSample (0, i) + b.getSample (1, i)); const double v = side ? m - b.getSample (1, i) : m; a += v * v; }
-                return 10 * std::log10 (a / n + 1e-30); };
-            std::cout << "  info  section mid/side dB: ref " << msDb (ref, 441000, 352800, false) << " / " << msDb (ref, 441000, 352800, true)
-                      << "   out " << msDb (out, s + latency, len, false) << " / " << msDb (out, s + latency, len, true) << "\n";
-            std::cout << "  info  Matchering loudness measure: output " << oDb << " dB, reference " << rDb << " dB\n";
-            check (std::abs (oDb - rDb) < 1.0, "live output loudness matches the reference (Matchering measure)");
-        }
-        float peak = 0;
-        for (int ch = 0; ch < 2; ++ch) peak = std::max (peak, out.getMagnitude (ch, 0, out.getNumSamples()));
-        check (peak <= 1.0f, "no output above 0 dBFS (peak " + juce::String (juce::Decibels::gainToDecibels (peak), 2) + " dBFS)");
+        juce::AudioBuffer<float> aligned (2, out.getNumSamples() - latency);
+        for (int ch = 0; ch < 2; ++ch) aligned.copyFrom (ch, 0, out, ch, latency, aligned.getNumSamples());
+        float tp = 0;
+        for (int ch = 0; ch < 2; ++ch) tp = std::max (tp, mm::TruePeakDetector::measure (aligned.getReadPointer (ch), aligned.getNumSamples()));
+        mm::Config cfg;
+        const double loudDb = 20 * std::log10 (mm::analyzeTarget (mm::toStereoAtRate (aligned, rate, 44100), cfg).matchRms);
+        std::cout << "  info  " << label << ": loudness " << juce::String (loudDb, 2) << " dB, true peak " << juce::String (juce::Decibels::gainToDecibels (tp), 2) << " dBTP\n";
+        return std::pair<double, float> (loudDb, juce::Decibels::gainToDecibels (tp));
+    };
+    mm::Config cfg;
+    auto refLoud = [&] (const juce::AudioBuffer<float>& r) { auto p = mm::analyzeReference (r, cfg); return 20 * std::log10 (p.matchRms * p.finalAmplitudeCoef); };
 
-        // Match knob at 0 -> transparent again
-        proc->apvts.getParameter ("match")->setValueNotifyingHost (0.0f);
-        juce::MessageManager::getInstance()->runDispatchLoopUntil (500);
-        playThrough (*proc, track, nullptr);
-        juce::AudioBuffer<float> dry (2, track.getNumSamples());
-        playThrough (*proc, track, &dry);
-        double err = 0;
-        for (int i = latency + 1000; i < track.getNumSamples() - 1000; ++i)
-            err = std::max (err, (double) std::abs (dry.getSample (0, i) - track.getSample (0, i - latency)));
-        check (err < 1e-3, "Match knob at 0% is transparent (max diff " + juce::String (err, 6) + ")");
-        proc->apvts.getParameter ("match")->setValueNotifyingHost (0.85f);
-        playThrough (*proc, track, nullptr);
-    }
+    auto a = measure ("profile A (bright)");
+    check (std::abs (a.first - refLoud (refBright)) < 1.5, "A matches its reference loudness (" + juce::String (refLoud (refBright), 2) + " dB)");
+    check (a.second <= -0.9f, "limiter holds the -1 dBTP ceiling");
+    proc->selectSlot (1);
+    pump (400);
+    auto b = measure ("profile B (warm)");
+    check (std::abs (b.first - refLoud (refWarm)) < 1.5, "B matches its reference loudness (" + juce::String (refLoud (refWarm), 2) + " dB)");
 
-    juce::MessageManager::getInstance()->runDispatchLoopUntil (300);
+    // limiter off (on the loud profile A): stays under the ceiling, suggests the missing gain
+    proc->selectSlot (0);
+    proc->apvts.getParameter ("limiter")->setValueNotifyingHost (0.0f);
+    pump (400);
+    auto off = measure ("limiter off");
+    std::cout << "  info  suggestion: +" << proc->suggestionDb.load() << " dB into your limiter\n";
+    check (off.second < 0.5f && proc->suggestionDb.load() > 0.0f, "limiter off keeps headroom and suggests gain");
+    proc->apvts.getParameter ("limiter")->setValueNotifyingHost (1.0f);
+
+    // Natural EQ: low latency
+    proc->apvts.getParameter ("eqMode")->setValueNotifyingHost (1.0f);
+    pump (400);
+    latency = proc->getLatencySamples();
+    std::cout << "  info  latency (natural EQ) " << latency << " samples (" << latency * 1000.0 / rate << " ms)\n";
+    std::pair<double, float> nat;
+    proc->selectSlot (1);
+    pump (400);
+    nat = measure ("profile B, natural EQ");
+    check (latency < 1000 && std::abs (nat.first - b.first) < 1.0, "Natural EQ: low latency, same loudness");
+
+    proc->apvts.getParameter ("match")->setValueNotifyingHost (0.0f);
+    pump (400);
+    check (transparency() < 1e-3, "Match knob at 0% is transparent");
+    proc->apvts.getParameter ("match")->setValueNotifyingHost (1.0f);
+    proc->apvts.getParameter ("smoothing")->setValueNotifyingHost (0.6f);
+    proc->apvts.getParameter ("eqMode")->setValueNotifyingHost (0.0f);
+    proc->selectSlot (0);
+    pump (1500);
+    playThrough (*proc, track, nullptr);
+    pump (300);
     snapshot (*editor, outDir.getChildFile ("3-matched.png"));
     for (auto* c : editor->getChildren())
-        if (auto* b = dynamic_cast<juce::TextButton*> (c); b != nullptr && b->getButtonText() == "Advanced")
-            b->triggerClick();
-    juce::MessageManager::getInstance()->runDispatchLoopUntil (300);
+        if (auto* btn = dynamic_cast<juce::TextButton*> (c); btn != nullptr && btn->getButtonText() == "Advanced")
+            btn->triggerClick();
+    pump (300);
     snapshot (*editor, outDir.getChildFile ("4-advanced.png"));
 
     editor.reset();
