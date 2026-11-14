@@ -25,16 +25,16 @@ Mono bass → Dynamic match → [Tame]   →     Match EQ → Character → Clip
 | v2.0 | Three reference profiles A/B/C, true-peak limiter with ceiling (−1 dBTP), limiter on/off, EQ smoothing, max correction, Linear/Natural EQ |
 | v2.1 | Knobs respond while turning, ClipOnly2 clipper before the limiter, references and match saved with the project |
 | v2.1.1 | Clipper → Gain → Limiter shown as separate stages with CLIP and LIM meters, **Level match** monitor (hear the EQ match at your track's loudness), **Learn quality** indicator (tells you when the spectrum is stable enough) |
+| v2.1.x | Rename to Mac and Cheese, Learn quality on fixed slices, design template |
+| **v2.2** | **Fix the mix**: Unclump (5-band dynamic match vs the reference) + Mono bass; three-column layout; Clip/Gain/Limiter with Auto; loudness and true-peak fixes |
 
 ## Next
 
-### v2.2: Fix the mix
-- **Dynamic match**: per-band dynamics learned from the reference, in 5 bands (sub, mud, mid, presence, top), mid and side separately. Each band is measured *relative to the whole mix*, so song dynamics are untouched, and only build-ups (mud in the chorus, harsh cymbal hits) are evened out. Cut-only by default, boost as an option. One knob plus per-band amounts and gain-reduction meters. Mid bands react around 100 ms, so transients pass through to the clipper and limiter.
-- **Mono bass** (from Airwindows ToVinyl4): makes the low end mono below a chosen frequency.
-- **"Fix from"** selector: use the active profile, or another slot, as the "healthy mix" reference.
-- The master match is learned on the *fixed* track, so the two sections don't correct the same thing twice.
-
 ### v2.3: Character and comparison
+- **Fun names back** as hover explanations on every control.
+- **Your own presets** as starting points (compressor-style values).
+- **Unclump speed** (Tight / Loose = attack/release), learned at both speeds.
+- **"Fix with" another reference** (A / B / C).
 - **Character stage** (Airwindows): **Point** (Punch, Tight/Loose), **PowerSag**, **Channel9** (console colour, drive), **Acceleration2 / Slew** (tame harshness or add grit), **Stonefire** (Air / Fire / Stone tone after the match).
 - **A+B+C average** profile: match the average of your three references, which is more robust than one song.
 - **Vinyl preset**: ToVinyl4 with the limiter off.

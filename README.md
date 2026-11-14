@@ -19,14 +19,14 @@ Get the latest `MacAndCheese-vX.Y.Z-macOS-VST3.zip` from **[Releases](https://gi
 
 ## How it works
 
-1. **References** – drop up to 3 well-mastered songs into slots **A / B / C**.
-2. **Learn** – press Learn and play your track, loudest part included. The button tells you when it has heard enough (the sound of your track has stopped changing); then press Stop. One Learn matches all three profiles.
-3. **Listen** – click A / B / C to compare. The match is applied live, non-destructively:
-   - **Match** knob: 0 % = your original, 100 % = the full Matchering result
-   - **Level match**: hear only the EQ match, at your track's own loudness — the fair way to judge the EQ (louder always sounds better)
-   - **Clipper → Gain → Limiter**: **Clip** (0–6 dB, default 0) shaves the loudest peaks (Airwindows ClipOnly2), a clean gain sets the level, the limiter catches what's left. CLIP and LIM meters show each stage's work
-   - **Limiter** (visible, always under your control): on/off, true peak (default on), ceiling (default −1 dBTP), gain-reduction readout. With the limiter off, the output keeps its headroom and the plugin tells you how much gain to push into your own limiter to match the reference.
-   - **Advanced**: matching EQ curve, Mid EQ / Side EQ / Loudness amounts, EQ **Smoothing**, **Max correction**, EQ mode **Linear** (phase-exact, ~92 ms latency) or **Natural** (no pre-echo, ~7 ms latency)
+1. **References**: drop up to 3 great-sounding songs into **A / B / C**.
+2. **Learn**: press Learn and play your track, loudest part included. The button says "enough" once the sound of your track has stopped changing; then press Stop. One Learn prepares all three references.
+3. **Listen**: click A / B / C to compare. Everything is live and non-destructive, in three steps that follow the signal:
+   - **1 Fix the mix**: **Unclump** evens out build-ups that come and go (mud blooming in a chorus, harsh cymbal hits) compared with the reference, in 5 bands (Bottom, Mud, Body, Bite, Fizz), mid and side separately. **Mono bass** makes the low end mono below a chosen frequency.
+   - **2 Match**: the matching EQ and loudness, computed on the *fixed* mix. The **Match** knob goes from your mix (0 %) to fully matched (100 %).
+   - **3 Loudness**: **Clip → Gain → Limiter**, three knobs, each **Auto** or manual (**Auto all** resets them). Auto clip shaves the peaks above the last ~1 dB of limiting (Airwindows ClipOnly2); auto gain matches the reference's loudness; auto limiter = −1 dBTP true peak. Limiter off: the output keeps its headroom and the plugin shows the gain to push into your own limiter.
+   - **Level match**: hear the result at your track's own loudness: the fair comparison (louder always sounds better).
+   - **Details**: EQ curve, Linear/Natural EQ, Mid/Side EQ, EQ smoothing, Max EQ, Unclump per band (50 % = match the reference, up to 2×), Allow boosts.
 
 Re-learn after big mix changes. References and the learned match are saved with your DAW project; after reopening, everything works, but loading a *new* reference needs a new Learn (the learned audio itself is not stored).
 

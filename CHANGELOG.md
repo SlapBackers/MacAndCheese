@@ -2,6 +2,26 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MacAndCheese/releases).
 
+## v2.2.0 — Fix the mix, three-step layout, Auto loudness
+
+**1 Fix the mix (new)**
+- **Unclump**: evens out build-ups that come and go (mud blooming in a chorus, harsh cymbal hits) compared with the reference. 5 bands (Bottom, Mud, Body, Bite, Fizz), mid and side separately, cut-only by default. Per band: 50 % = match the reference, up to 2×. Band meters show each cut.
+- **Mono bass**: mono low end below a chosen frequency.
+- The match is computed on the *fixed* mix, so fix and match never correct the same thing twice.
+
+**3 Loudness**
+- **Clip → Gain → Limiter** as three knobs, each **Auto** or manual, plus **Auto all**. Auto clip leaves the limiter ~1 dB; auto gain = the reference's loudness (replaces the Loudness % knob); auto limiter = −1 dBTP.
+- Numbers on the CLIP and LIM meters.
+
+**Layout**: three columns in signal order (1 Fix the mix, 2 Match, 3 Loudness), plain names, **Details** side panel (fits laptop screens).
+
+**Fixes**
+- Loudness drifted when changing EQ smoothing or Max EQ: the loudness match now uses the same capped EQ as the sound and is recomputed when they change.
+- The limiter could overshoot the true-peak ceiling by ~0.2 dB when working hard; it now holds it exactly.
+- Learn says "enough" on real songs.
+
+Note: projects saved with earlier versions open with Clip/Gain/Limiter on Auto, so Clip now acts by default.
+
 ## v2.1.4 — fixes
 
 - Learn says "enough" more readily on real songs: the spectrum may change up to 1 dB on average (was 0.5), and the loudest part only counts as beaten when a later part is more than 1 dB louder (songs often end on their loudest chorus).

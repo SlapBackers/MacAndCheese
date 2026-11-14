@@ -1,4 +1,4 @@
-# Mac and Cheese GUI spec (v2.1.2)
+# Mac and Cheese GUI spec (v2.2)
 
 Everything a GUI designer needs: what the user can touch, what the plugin shows, and in which states.
 The current GUI (`Source/PluginEditor.cpp`) is a functional placeholder; this spec is the contract a new design must cover.
@@ -13,21 +13,28 @@ The current GUI (`Source/PluginEditor.cpp`) is a functional placeholder; this sp
 
 ## Controls (automatable parameters)
 
-| ID | Name | Type / range | Default | Notes |
+Plain names for now; fun names come back later as hover explanations.
+
+| ID | Name | Range | Default | Section |
 |---|---|---|---|---|
-| `match` | Match | 0–100 % | 100 % | Main knob. Blends everything (EQ, loudness, clip) from dry to fully matched. |
-| `profile` | Profile | A / B / C | A | Active reference slot. Clicking a slot card selects it. |
-| `clip` | Clip | 0–6 dB, 0.1 steps | 0 dB | dB the clipper shaves off the loudest peaks before the limiter. 0 = off. |
-| `limiter` | Limiter | on / off | on | Off: output kept under the ceiling, plugin shows the gain still needed. |
-| `levelMatch` | Level match | on / off | off | Monitoring switch (not automatable): EQ match only, at the track's own loudness. |
-| `truePeak` | True peak | on / off | on | Disabled (greyed) when the limiter is off. |
-| `ceiling` | Ceiling | −6…0 dB, 0.1 steps | −1.0 dB | dBTP when True peak is on. |
-| `eqMode` | EQ mode | Linear / Natural | Linear | Natural = no pre-echo, lower latency. Advanced. |
-| `midEq` | Mid EQ | 0–100 % | 100 % | Advanced. |
-| `sideEq` | Side EQ | 0–100 % | 100 % | Advanced. |
-| `loudness` | Loudness | 0–100 % | 100 % | Advanced. How much of the loudness match is applied. |
-| `smoothing` | Smoothing | 0–100 % | 0 % | Advanced. Detailed curve → broad tilt. Takes ~0.5 s to update. |
-| `maxCorr` | Max correction | 3–24 dB, 0.1 steps | 12 dB | Advanced. Caps EQ boosts/cuts. |
+| `profile` | Reference | A / B / C | A | top row (slot cards) |
+| `unclump` | Unclump | 0–100 % | 0 % | 1 Fix the mix |
+| `monoBase` | Mono bass | Off, 20–300 Hz | Off | 1 Fix the mix |
+| `match` | Match | 0–100 % | 100 % | 2 Match (hero knob) |
+| `clip` / `clipAuto` | Clip | 0–6 dB / Auto | Auto | 3 Loudness |
+| `gain` / `gainAuto` | Gain | −12…+36 dB / Auto | Auto | 3 Loudness |
+| `ceiling` / `ceilingAuto` | Limiter (ceiling) | −6…0 dB / Auto (−1 dBTP) | Auto | 3 Loudness |
+| `limiter` | Limiter on | on / off | on | 3 Loudness |
+| `truePeak` | True peak | on / off | on | 3 Loudness |
+| `levelMatch` | Level match | on / off (not automatable) | off | header |
+| `eqMode` | EQ mode | Linear / Natural | Linear | Details |
+| `midEq`, `sideEq` | Mid EQ, Side EQ | 0–100 % | 100 % | Details |
+| `smoothing` | EQ smoothing | 0–100 % | 0 % | Details |
+| `maxCorr` | Max EQ | 3–24 dB | 12 dB | Details |
+| `bandBottom` … `bandFizz` | Unclump per band | 0–100 % (50 % = match) | 50 % | Details |
+| `fluff` | Allow boosts (+3 dB) | on / off | off | Details |
+
+Auto switches: switching one off leaves its knob at the value Auto was using. "Auto all" switches all three on.
 
 ## Actions (not parameters)
 
