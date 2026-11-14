@@ -64,6 +64,7 @@ public:
         gainTarget = {};
         gainLin.fill ({ 1, 1, 1, 1, 1 });
         reduction = {};
+        boost = {};
     }
 
     // track and reference statistics -> mapping tables (call before processing; not real time)
@@ -115,10 +116,11 @@ public:
                         if (has && set.amount > 0.0f)
                         {
                             const float rel = relDb (env[(size_t) c][(size_t) b], mixEnv);
-                            g = juce::jlimit (-12.0f, set.fluff ? 3.0f : 0.0f, map (c, b, rel) * set.amount * set.bands[(size_t) b]);
+                            g = juce::jlimit (-18.0f, set.fluff ? 3.0f : 0.0f, map (c, b, rel) * set.amount * set.bands[(size_t) b]);
                         }
                         gainTarget[(size_t) c][(size_t) b] = juce::Decibels::decibelsToGain (g);
                         reduction[(size_t) b] = juce::jmax (reduction[(size_t) b], -g);
+                        boost[(size_t) b] = juce::jmax (boost[(size_t) b], g);
                     }
             }
             float out[2] = { 0, 0 };
@@ -140,6 +142,7 @@ public:
 
     // max reduction per band (dB) since the last call
     std::array<float, prepBands> popReduction() noexcept { auto r = reduction; reduction = {}; return r; }
+    std::array<float, prepBands> popBoost() noexcept { auto r = boost; boost = {}; return r; } // "Allow boosts"
 
     // offline: band-level statistics of a mid/side signal (same detectors as live)
     static BandStats analyse (const std::vector<float>& mid, const std::vector<float>& side, double rate)
@@ -239,7 +242,7 @@ private:
     juce::SmoothedValue<float> mix;
     std::array<std::array<float, prepBands>, 2> env {}, gainTarget {}, gainLin {};
     std::array<std::array<std::array<float, prepPoints>, prepBands>, 2> x {}, y {};
-    std::array<float, prepBands> reduction {};
+    std::array<float, prepBands> reduction {}, boost {};
     float mixEnv = 0.0f;
     int ctl = 0;
     bool has = false;

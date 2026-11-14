@@ -81,7 +81,7 @@ public:
 
     // Learn quality: how much the learned spectrum still changes between checks (-1 = not measured yet)
     std::atomic<float> learnDeviationDb { -1.0f };
-    std::array<std::atomic<float>, mm::prepBands> bandReduction {}; // PREP: dB per band (Bottom..Fizz)
+    std::array<std::atomic<float>, mm::prepBands> bandReduction {}, bandBoost {}; // PREP: dB cut / boost per band (Bottom..Fizz)
     std::atomic<bool> learnEnough { false };
 
     juce::AudioProcessorValueTreeState apvts;

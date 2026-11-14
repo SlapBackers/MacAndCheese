@@ -281,8 +281,12 @@ void MacAndCheeseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     meterL.store (juce::jmax (peakL, meterL.load() * 0.92f));
     meterR.store (juce::jmax (numCh > 1 ? peakR : peakL, meterR.load() * 0.92f));
     const auto red = prep.popReduction();
+    const auto up = prep.popBoost();
     for (int b = 0; b < mm::prepBands; ++b)
+    {
         bandReduction[(size_t) b].store (juce::jmax (red[(size_t) b], bandReduction[(size_t) b].load() * 0.92f));
+        bandBoost[(size_t) b].store (juce::jmax (up[(size_t) b], bandBoost[(size_t) b].load() * 0.92f));
+    }
     const float shaved = clipOver > clipSoftStart ? juce::Decibels::gainToDecibels (clipOver / clipSoftStart) : 0.0f;
     clipOver = 0.0f;
     clipDbNow.store (juce::jmax (shaved, clipDbNow.load() * 0.92f));
@@ -665,6 +669,11 @@ MacAndCheeseProcessor::Snapshot MacAndCheeseProcessor::getSnapshot() const
         s.message = "Press Learn and play your track";
     else if (! s.slots[(size_t) active].loaded)
         s.message = "Drop a song into reference " + slotNames[active];
+    else if (s.slots[(size_t) active].matched && pUnclump->load() > 0.0f && ! (trackBands.valid && slots[(size_t) active].bands.valid))
+    {
+        s.message = "Unclump has no data for this reference: reload it and Learn again (it was loaded or learned before v2.2)";
+        s.messageIsError = true;
+    }
     else if (s.slots[(size_t) active].matched)
         s.message = "Reference " + slotNames[active] + " matched - switch A / B / C to compare";
     return s;

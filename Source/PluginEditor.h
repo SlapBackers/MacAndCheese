@@ -85,7 +85,7 @@ namespace ui
     class BandMeter : public juce::Component
     {
     public:
-        std::array<float, mm::prepBands> db {};
+        std::array<float, mm::prepBands> db {}, boost {}; // cut (0-18 dB, down), boost (0-3 dB, up)
         void paint (juce::Graphics&) override;
     };
 }

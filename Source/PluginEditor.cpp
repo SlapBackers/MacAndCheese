@@ -299,11 +299,19 @@ void BandMeter::paint (juce::Graphics& g)
         auto label = cell.removeFromBottom (14);
         g.setColour (colours::panel);
         g.fillRoundedRectangle (cell, 3.0f);
+        // bipolar: boosts above the 0 line (up to +3 dB), cuts below it (down to -18 dB)
+        const float cut = db[(size_t) b], up = boost[(size_t) b];
+        auto upZone = cell.removeFromTop (cell.getHeight() * 0.2f);
+        g.setColour (colours::accent);
+        g.fillRect (upZone.withTrimmedTop (upZone.getHeight() * (1.0f - juce::jlimit (0.0f, 1.0f, up / 3.0f))));
         g.setColour (colours::accent2);
-        g.fillRoundedRectangle (cell.withHeight (cell.getHeight() * juce::jlimit (0.0f, 1.0f, db[(size_t) b] / 12.0f)), 3.0f);
+        g.fillRect (cell.withHeight (cell.getHeight() * juce::jlimit (0.0f, 1.0f, cut / 18.0f)));
+        g.setColour (colours::dim);
+        g.drawHorizontalLine ((int) cell.getY(), cell.getX(), cell.getRight()); // 0 dB
         g.setColour (colours::text);
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-        g.drawText (db[(size_t) b] >= 0.05f ? "-" + juce::String (db[(size_t) b], 1) : juce::String ("0"), cell.removeFromBottom (16), juce::Justification::centred);
+        g.drawText (up > cut && up >= 0.05f ? "+" + juce::String (up, 1) : cut >= 0.05f ? "-" + juce::String (cut, 1) : juce::String ("0"),
+                    cell.removeFromBottom (16), juce::Justification::centred);
         g.setColour (colours::dim);
         g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
         g.drawText (names[b], label, juce::Justification::centred);
@@ -433,7 +441,7 @@ MacAndCheeseEditor::MacAndCheeseEditor (MacAndCheeseProcessor& p) : AudioProcess
     const char* bandIds[] = { "bandBottom", "bandMud", "bandBody", "bandBite", "bandFizz" };
     const char* bandNames[] = { "BOTTOM", "MUD", "BODY", "BITE", "FIZZ" };
     for (int b = 0; b < mm::prepBands; ++b)
-        setupKnob (bands[(size_t) b], bandNames[b], bandIds[b], "50 % = match the reference. More = stronger, less = gentler");
+        setupKnob (bands[(size_t) b], bandNames[b], bandIds[b], "50 % = match the reference. More = stronger (up to 2x, -18 dB), less = gentler");
     boostsButton.setColour (juce::ToggleButton::tickColourId, colours::accent);
     addAndMakeVisible (boostsButton);
     boostsAtt = std::make_unique<ButtonAtt> (vts, "fluff", boostsButton);
@@ -613,7 +621,10 @@ void MacAndCheeseEditor::timerCallback()
     meter.clipDb = proc.clipDbNow.load();
     meter.repaint();
     for (int b = 0; b < mm::prepBands; ++b)
+    {
         bandMeter.db[(size_t) b] = proc.bandReduction[(size_t) b].load();
+        bandMeter.boost[(size_t) b] = proc.bandBoost[(size_t) b].load();
+    }
     bandMeter.repaint();
 
     const bool limOn = limiterButton.getToggleState(), lm = levelMatchButton.getToggleState();
