@@ -34,7 +34,7 @@ struct BandStats
 struct PrepSettings
 {
     float amount = 0.0f;                      // Unclump 0..1
-    std::array<float, prepBands> bands { 1, 1, 1, 1, 1 };
+    std::array<float, prepBands> bands { 1, 1, 1, 1, 1 }; // 1 = match the reference, up to 2
     bool fluff = false;
     float monoHz = 0.0f;                      // < 20 = off
     bool active() const noexcept { return amount > 0.0f || monoHz >= 20.0f; }
@@ -115,7 +115,7 @@ public:
                         if (has && set.amount > 0.0f)
                         {
                             const float rel = relDb (env[(size_t) c][(size_t) b], mixEnv);
-                            g = juce::jlimit (-9.0f, set.fluff ? 3.0f : 0.0f, map (c, b, rel)) * set.amount * set.bands[(size_t) b];
+                            g = juce::jlimit (-12.0f, set.fluff ? 3.0f : 0.0f, map (c, b, rel) * set.amount * set.bands[(size_t) b]);
                         }
                         gainTarget[(size_t) c][(size_t) b] = juce::Decibels::decibelsToGain (g);
                         reduction[(size_t) b] = juce::jmax (reduction[(size_t) b], -g);

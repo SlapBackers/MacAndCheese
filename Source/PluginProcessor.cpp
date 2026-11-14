@@ -73,7 +73,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout MacAndCheeseProcessor::creat
     l.add (std::make_unique<F> (juce::ParameterID { "monoBase", 1 }, "Mono Bass", juce::NormalisableRange<float> (0.0f, 300.0f, 1.0f), 0.0f,
                                 juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v < 20.0f ? juce::String ("Off") : juce::String (juce::roundToInt (v)) + " Hz"; })));
     for (int b = 0; b < mm::prepBands; ++b)
-        l.add (std::make_unique<F> (juce::ParameterID { bandIds[b], 1 }, bandNames[b], percent, 100.0f, pct));
+        l.add (std::make_unique<F> (juce::ParameterID { bandIds[b], 1 }, bandNames[b], percent, 50.0f, // 50 % = match the reference
+                                    juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return std::abs (v - 50.0f) < 0.5f ? juce::String ("match") : juce::String (juce::roundToInt (v)) + " %"; })));
     l.add (std::make_unique<B> (juce::ParameterID { "fluff", 1 }, "Allow Boosts", false));
     l.add (std::make_unique<Ch> (juce::ParameterID { "profile", 1 }, "Profile", slotNames, 0));
     // EQ
@@ -565,7 +566,7 @@ mm::PrepSettings MacAndCheeseProcessor::prepSettings() const
     s.monoHz = pMonoBase->load();
     s.fluff = pFluff->load() > 0.5f;
     for (int b = 0; b < mm::prepBands; ++b)
-        s.bands[(size_t) b] = pBand[(size_t) b]->load() * 0.01f;
+        s.bands[(size_t) b] = pBand[(size_t) b]->load() / 50.0f; // 50 % = 1x (match), 100 % = 2x
     return s;
 }
 

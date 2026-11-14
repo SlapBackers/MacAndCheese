@@ -276,6 +276,11 @@ void Meter::paint (juce::Graphics& g)
     bar ({ area.getX() + 2 * (w + 4), area.getY(), w, area.getHeight() }, juce::jlimit (0.0f, 1.0f, clipDb / 12.0f), colours::accent, true);
     bar ({ area.getX() + 3 * (w + 4), area.getY(), w, area.getHeight() }, juce::jlimit (0.0f, 1.0f, grDb / 12.0f), colours::accent, true);
 
+    g.setColour (colours::text);
+    g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+    for (auto [i, v] : { std::pair<int, float> { 2, clipDb }, { 3, grDb } })
+        g.drawText (v >= 0.05f ? "-" + juce::String (v, 1) : juce::String ("0"),
+                    juce::Rectangle<float> (area.getX() + i * (w + 4) - 4, area.getBottom() - 16, w + 8, 14), juce::Justification::centred);
     g.setColour (colours::dim);
     g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
     const char* names[] = { "L", "R", "CLIP", "LIM" };
@@ -295,7 +300,10 @@ void BandMeter::paint (juce::Graphics& g)
         g.setColour (colours::panel);
         g.fillRoundedRectangle (cell, 3.0f);
         g.setColour (colours::accent2);
-        g.fillRoundedRectangle (cell.withHeight (cell.getHeight() * juce::jlimit (0.0f, 1.0f, db[(size_t) b] / 9.0f)), 3.0f);
+        g.fillRoundedRectangle (cell.withHeight (cell.getHeight() * juce::jlimit (0.0f, 1.0f, db[(size_t) b] / 12.0f)), 3.0f);
+        g.setColour (colours::text);
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawText (db[(size_t) b] >= 0.05f ? "-" + juce::String (db[(size_t) b], 1) : juce::String ("0"), cell.removeFromBottom (16), juce::Justification::centred);
         g.setColour (colours::dim);
         g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
         g.drawText (names[b], label, juce::Justification::centred);
@@ -425,7 +433,7 @@ MacAndCheeseEditor::MacAndCheeseEditor (MacAndCheeseProcessor& p) : AudioProcess
     const char* bandIds[] = { "bandBottom", "bandMud", "bandBody", "bandBite", "bandFizz" };
     const char* bandNames[] = { "BOTTOM", "MUD", "BODY", "BITE", "FIZZ" };
     for (int b = 0; b < mm::prepBands; ++b)
-        setupKnob (bands[(size_t) b], bandNames[b], bandIds[b], "How much Unclump may act on this band");
+        setupKnob (bands[(size_t) b], bandNames[b], bandIds[b], "50 % = match the reference. More = stronger, less = gentler");
     boostsButton.setColour (juce::ToggleButton::tickColourId, colours::accent);
     addAndMakeVisible (boostsButton);
     boostsAtt = std::make_unique<ButtonAtt> (vts, "fluff", boostsButton);

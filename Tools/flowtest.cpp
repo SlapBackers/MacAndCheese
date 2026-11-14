@@ -167,7 +167,7 @@ int prepTest()
 }
 
 // Real songs: flowtest --real <mix> <reference>. Taste (in 2 s chunks, GUI timer running), then Unclump at 100 %.
-int realTest (const juce::File& mixFile, const juce::File& refFile)
+int realTest (const juce::File& mixFile, const juce::File& refFile, float bandPct)
 {
     juce::AudioFormatManager fm;
     fm.registerBasicFormats();
@@ -223,12 +223,14 @@ int realTest (const juce::File& mixFile, const juce::File& refFile)
 
     auto* u = proc.apvts.getParameter ("unclump");
     u->setValueNotifyingHost (1.0f);
+    for (auto* id : { "bandBottom", "bandMud", "bandBody", "bandBite", "bandFizz" })
+        proc.apvts.getParameter (id)->setValueNotifyingHost (bandPct / 100.0f);
     pump (12000); // re-match on the prepped track
     std::array<float, mm::prepBands> maxRed {};
     std::array<double, mm::prepBands> busy {};
     const int blocks = play (0, mix.getNumSamples(), &maxRed, &busy);
     const char* names[] = { "Bottom", "Mud", "Body", "Bite", "Fizz" };
-    std::cout << "Unclump 100 %: max cut / time cutting more than 1 dB\n";
+    std::cout << "Unclump 100 %, bands " << bandPct << " %: max cut / time cutting more than 1 dB\n";
     for (int b = 0; b < mm::prepBands; ++b)
         std::cout << "  " << names[b] << ": " << juce::String (maxRed[(size_t) b], 1) << " dB, " << juce::roundToInt (100.0 * busy[(size_t) b] / blocks) << " %\n";
     return 0;
@@ -259,7 +261,7 @@ int main (int argc, char* argv[])
 {
     juce::ScopedJuceInitialiser_GUI gui;
     if (argc > 3 && juce::String (argv[1]) == "--real")
-        return realTest (juce::File (juce::String::fromUTF8 (argv[2])), juce::File (juce::String::fromUTF8 (argv[3])));
+        return realTest (juce::File (juce::String::fromUTF8 (argv[2])), juce::File (juce::String::fromUTF8 (argv[3])), argc > 4 ? juce::String (argv[4]).getFloatValue() : 50.0f);
     if (argc > 2 && juce::String (argv[1]) == "--load-vst3")
         return loadVst3 (argv[2]);
     const juce::File outDir (argc > 1 ? argv[1] : juce::File::getCurrentWorkingDirectory().getFullPathName());
