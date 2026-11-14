@@ -2,6 +2,12 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MacAndCheese/releases).
 
+## v2.2.1 — stronger Unclump, clearer band meters
+
+- Unclump can cut up to **−18 dB** (was −12), so per-band 100 % (2×) really pushes on heavy mixes.
+- Band meters are bipolar: cuts go down, boosts (with Allow boosts) go up, each with its number.
+- If Unclump has no data (reference loaded or track learned before v2.2), the plugin says so instead of silently doing nothing.
+
 ## v2.2.0 — Fix the mix, three-step layout, Auto loudness
 
 **1 Fix the mix (new)**

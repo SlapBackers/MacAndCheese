@@ -241,7 +241,11 @@ int realTest (const juce::File& mixFile, const juce::File& refFile, float bandPc
     pump (12000); // re-match on the prepped track
     std::array<float, mm::prepBands> maxRed {};
     std::array<double, mm::prepBands> busy {};
+    proc.maxClipDb = 0.0f; proc.maxGrDb = 0.0f;
     const int blocks = play (0, mix.getNumSamples(), &maxRed, &busy);
+    std::cout << "Loudness (auto): clip set " << juce::String (proc.effClipDb.load(), 1) << " dB (max shaved " << juce::String (proc.maxClipDb.load(), 1)
+              << ") > gain " << juce::String (proc.gainIntoLimiterDb.load(), 1) << " dB > limiter max " << juce::String (proc.maxGrDb.load(), 1)
+              << " dB, ceiling " << juce::String (proc.effCeilingDb.load(), 1) << "\n";
     const char* names[] = { "Bottom", "Mud", "Body", "Bite", "Fizz" };
     std::cout << "Unclump 100 %, bands " << bandPct << " %: max cut / time cutting more than 1 dB\n";
     for (int b = 0; b < mm::prepBands; ++b)
