@@ -1,6 +1,7 @@
 /*
     Mac and Cheese - semi-real-time Matchering as a VST3 (GPLv3).
-    Flow: load up to 3 references (A/B/C) -> Learn (listen to the live track once) -> switch profiles live.
+    Flow: load up to 3 references (A/B/C) -> Learn (listen to the track once) -> live chain:
+    1 fix (mono bass, Unclump) -> 2 match (M/S EQ) -> 3 loudness (clip -> gain -> limiter).
 */
 #pragma once
 
@@ -123,8 +124,7 @@ private:
     bool restoredFromProject = false; // guarded by dataLock
     juce::String message;
     bool messageIsError = false;
-    std::atomic<bool> resultsChanged { false }, resmoothPending { false };
-    double requestedFrac = 0.0375;
+    std::atomic<bool> resultsChanged { false };
     int shownSlot = -1;
 
     // capture of the live track during Learn

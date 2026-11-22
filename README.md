@@ -10,12 +10,16 @@ Reference mastering as a VST3 plugin: a semi-real-time version of Matchering, ru
 
 ## Download
 
-Get the latest `MacAndCheese-vX.Y.Z-macOS-VST3.zip` from **[Releases](https://github.com/SlapBackers/MacAndCheese/releases)** — what changed is in the [CHANGELOG](CHANGELOG.md).
+### [⬇ Download the VST3 plugin for macOS](https://github.com/SlapBackers/MacAndCheese/releases/latest/download/Mac-and-Cheese-VST3-plugin-macOS.zip)
 
-1. Unzip and copy `Mac and Cheese.vst3` to `~/Library/Audio/Plug-Ins/VST3`
-2. The plugin is not notarised by Apple yet. If your DAW doesn't show it, run once in Terminal:
-   `xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/VST3/Mac and Cheese.vst3"`
+Always the latest version (Apple Silicon and Intel). What changed: [CHANGELOG](CHANGELOG.md) · all versions: [Releases](https://github.com/SlapBackers/MacAndCheese/releases).
+
+1. Unzip it: you get **`Mac and Cheese.vst3`**.
+2. Move it to `~/Library/Audio/Plug-Ins/VST3` (in Finder: Go → Go to Folder…, paste the path).
 3. Rescan plugins in your DAW.
+
+If your DAW doesn't list it (macOS blocks plugins that aren't notarised by Apple yet), run once in Terminal:
+`xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/VST3/Mac and Cheese.vst3"`
 
 ## How it works
 

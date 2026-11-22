@@ -62,10 +62,9 @@ namespace ui
         void mouseUp (const juce::MouseEvent&) override;
         void mouseEnter (const juce::MouseEvent&) override { repaint(); }
         void mouseExit (const juce::MouseEvent&) override { repaint(); }
-        bool isEnabledForClick() const;
     };
 
-    // Matching EQ curve display (advanced)
+    // Matching EQ curve display (Details panel)
     class CurveView : public juce::Component
     {
     public:
@@ -157,6 +156,9 @@ private:
     std::unique_ptr<ButtonAtt> boostsAtt;
     juce::Label info;
 
+    // everything is laid out at full size inside `content`, then drawn at uiScale so it fits laptop screens
+    juce::Component content;
+    static constexpr float uiScale = 0.84f;
     bool details = false;
     static constexpr int height = 560, mainWidth = 900, detailsWidth = 400;
     static constexpr int topBottom = 220; // end of the references row

@@ -6,7 +6,7 @@
     so song dynamics are left alone and a swelling band isn't hidden by the mix swelling with it.
     Learning stores where that relative level usually sits (percentiles) in the track and in a reference;
     when the track's band climbs further above its usual level than the reference's ever does (mud building
-    up, harsh cymbal hits), it is pulled down to the reference's spread. Cut-only unless Fluff allows +3 dB.
+    up, harsh cymbal hits), it is pulled down to the reference's spread. Cut-only unless "Allow boosts" (param "fluff") permits +3 dB.
 
     Mono base: side high-pass (24 dB/oct) = mono low end below the chosen frequency.
     The same class runs live and offline (to analyse, and to match the master on the prepped track).

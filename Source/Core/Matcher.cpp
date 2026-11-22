@@ -470,7 +470,7 @@ MatchResult match (const TargetProfile& tgt, const ReferenceProfile& ref, const 
     res.sideCurve = smoothMatchingCurve (res.sideMatching, cfg);
 
     // EQ the learned track once (unity gain): peaks for the "limiter off" headroom, mid for RMS correction
-    // the same capped EQ as the live chain, so the loudness match holds whatever Max seasoning is set to
+    // the same capped EQ as the live chain, so the loudness match holds whatever Max EQ is set to
     auto midFir = designFir (res.midCurve, cfg.sampleRate, cfg.fftSize, cfg.sampleRate, cfg.fftSize, 1.0f, cfg.maxBoostDb);
     auto sideFir = designFir (res.sideCurve, cfg.sampleRate, cfg.fftSize, cfg.sampleRate, cfg.fftSize, 1.0f, cfg.maxBoostDb);
     auto midEq = convolveSame (tgt.mid, midFir);

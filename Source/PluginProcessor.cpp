@@ -42,8 +42,6 @@ MacAndCheeseProcessor::MacAndCheeseProcessor()
     for (int b = 0; b < mm::prepBands; ++b)
         pBand[(size_t) b] = apvts.getRawParameterValue (bandIds[b]);
     pProfile = apvts.getRawParameterValue ("profile");
-    for (auto& b : slotBusy)
-        b = false;
     startTimerHz (30);
     builder.startThread (juce::Thread::Priority::high);
 }
@@ -83,7 +81,6 @@ juce::AudioProcessorValueTreeState::ParameterLayout MacAndCheeseProcessor::creat
     l.add (std::make_unique<F> (juce::ParameterID { "smoothing", 1 }, "EQ Smoothing", percent, 0.0f, pct));
     l.add (std::make_unique<F> (juce::ParameterID { "maxCorr", 1 }, "Max EQ", juce::NormalisableRange<float> (3.0f, 24.0f, 0.1f), 12.0f, db));
     l.add (std::make_unique<Ch> (juce::ParameterID { "eqMode", 1 }, "EQ Mode", juce::StringArray { "Linear", "Natural" }, 0));
-    // loudness + limiter
     // loudness: clipper -> gain -> limiter, each automatic or manual
     l.add (std::make_unique<B> (juce::ParameterID { "clipAuto", 1 }, "Clip Auto", true));
     l.add (std::make_unique<F> (juce::ParameterID { "clip", 1 }, "Clip", juce::NormalisableRange<float> (0.0f, 6.0f, 0.1f), 0.0f, db));
@@ -509,12 +506,11 @@ void MacAndCheeseProcessor::matchSlots (std::vector<int> which)
 {
     std::shared_ptr<mm::TargetProfile> t;
     mm::BandStats tb;
-    double frac;
+    const double frac = currentFrac();
     {
         const juce::ScopedLock sl (dataLock);
         t = track;
         tb = trackBands;
-        frac = requestedFrac;
     }
     if (t == nullptr)
         return;
@@ -557,7 +553,7 @@ void MacAndCheeseProcessor::matchSlots (std::vector<int> which)
         }
         catch (const std::exception& e)
         {
-            setMessage ("Profile " + slotNames[i] + ": " + e.what(), true);
+            setMessage ("Reference " + slotNames[i] + ": " + e.what(), true);
         }
     }
     resultsChanged = true;
@@ -695,7 +691,8 @@ void MacAndCheeseProcessor::timerCallback()
     const auto ps = prepSettings();
     juce::String key = juce::String (ps.amount, 2) + ":" + juce::String ((int) ps.monoHz) + ":" + juce::String (active) + ":" + juce::String ((int) ps.fluff);
     for (auto b : ps.bands) key << ":" << juce::String (b, 2);
-    key << ":" << juce::String (pMaxCorr->load(), 1); // Max seasoning changes the EQ, so the loudness match too
+    // Max EQ and EQ smoothing change the EQ, so the loudness match must follow them too
+    key << ":" << juce::String (pMaxCorr->load(), 1) << ":" << juce::String (pSmoothing->load(), 1);
     const double now = juce::Time::getMillisecondCounterHiRes();
     if (key != lastPrepKey)
     {
@@ -703,10 +700,10 @@ void MacAndCheeseProcessor::timerCallback()
         prepChangedAt = now;
         applyPrepStats();
     }
-    else if (prepChangedAt > 0.0 && now - prepChangedAt > 500.0 && hasLearnedTrack())
+    else if (prepChangedAt > 0.0 && now - prepChangedAt > 500.0)
     {
-        prepChangedAt = 0.0; // settled: re-match the master on the newly prepped track
-        pool.addJob ([this] { matchSlots ({ 0, 1, 2 }); });
+        prepChangedAt = 0.0; // settled: re-match (after reopening a project there is no track: re-smooth the curves only)
+        pool.addJob ([this] { if (hasLearnedTrack()) matchSlots ({ 0, 1, 2 }); else resmooth (currentFrac()); });
     }
 
     const int mode = pEqMode->load() > 0.5f ? 1 : 0;
@@ -808,24 +805,6 @@ void MacAndCheeseProcessor::applyActiveSlot()
 
 void MacAndCheeseProcessor::builderTick()
 {
-    // Blend (EQ smoothing) changes the EQ, so the loudness match must follow: re-run the full match when the
-    // learned track is there; after reopening a project (no track) only the curves can be re-smoothed.
-    const double frac = currentFrac();
-    if (std::abs (frac - requestedFrac) > 1e-5 && ! resmoothPending.load())
-    {
-        {
-            const juce::ScopedLock sl (dataLock);
-            requestedFrac = frac;
-        }
-        resmoothPending = true;
-        pool.addJob ([this, frac]
-        {
-            if (hasLearnedTrack()) matchSlots ({ 0, 1, 2 });
-            else resmooth (frac);
-            resmoothPending = false;
-        });
-    }
-
     const juce::ScopedLock sl (builderLock);
     midConv.collectGarbage();
     sideConv.collectGarbage();
@@ -879,7 +858,7 @@ void MacAndCheeseProcessor::buildAndOffer (bool immediate)
     builtSource = src;
 }
 
-// ------------------------------------------------------------------ state (parameters only)
+// ------------------------------------------------------------------ state: parameters, references, matches
 
 namespace
 {
@@ -1047,7 +1026,6 @@ void MacAndCheeseProcessor::setStateInformation (const void* data, int size)
         trackBands = bandsFrom (root["trackBands"]);
         track = nullptr;       // the learned audio itself is not stored in the project
         restoredFromProject = true;
-        requestedFrac = currentFrac(); // stored curves are already smoothed with the saved setting
     }
     lastPeakKey = {};
     exactPeakValid = false;

@@ -2,6 +2,12 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MacAndCheese/releases).
 
+## v2.2.2 — comfort
+
+- **Smaller window**: 756 × 470 (1092 × 470 with Details), fits laptop screens with the DAW around it.
+- **Easier download**: one clearly named file, `Mac-and-Cheese-VST3-plugin-macOS.zip`, and a direct "Download the VST3 plugin" link at the top of the README that always gives the latest version.
+- Leaner code: EQ smoothing, Max EQ and Unclump now share one "settled → re-match" path; stale names removed.
+
 ## v2.2.1 — stronger Unclump, clearer band meters
 
 - Unclump can cut up to **−18 dB** (was −12), so per-band 100 % (2×) really pushes on heavy mixes.

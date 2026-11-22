@@ -179,7 +179,7 @@ int prepTest()
     return failures;
 }
 
-// Real songs: flowtest --real <mix> <reference>. Taste (in 2 s chunks, GUI timer running), then Unclump at 100 %.
+// Real songs: flowtest --real <mix> <reference> [band %]. Learn (in 2 s chunks, GUI timer running), then Unclump at 100 %.
 int realTest (const juce::File& mixFile, const juce::File& refFile, float bandPct)
 {
     juce::AudioFormatManager fm;
@@ -228,8 +228,8 @@ int realTest (const juce::File& mixFile, const juce::File& refFile, float bandPc
         if (proc.learnEnough.load() && enoughAt < 0) enoughAt = secs;
         if (juce::roundToInt (secs) % 15 < 2) timeline << juce::roundToInt (secs) << "s:" << juce::String (proc.learnDeviationDb.load(), 1) << " ";
     }
-    std::cout << "Taste: spectrum change per 15 s slice: " << timeline << "\n";
-    std::cout << "Taste: " << (enoughAt >= 0 ? "says 'enough' at " + juce::String (enoughAt, 0) + " s" : juce::String ("never says 'enough'")) << "\n";
+    std::cout << "Learn: spectrum change per 15 s slice: " << timeline << "\n";
+    std::cout << "Learn: " << (enoughAt >= 0 ? "says 'enough' at " + juce::String (enoughAt, 0) + " s" : juce::String ("never says 'enough'")) << "\n";
     proc.stopLearning();
     for (int t = 0; t < 1200 && ! proc.getSnapshot().slots[0].matched; ++t) pump (50);
     pump (500);
@@ -511,9 +511,10 @@ int main (int argc, char* argv[])
     playThrough (*proc, track, nullptr);
     pump (300);
     snapshot (*editor, outDir.getChildFile ("3-matched.png"));
-    for (auto* c : editor->getChildren())
-        if (auto* btn = dynamic_cast<juce::TextButton*> (c); btn != nullptr && btn->getButtonText() == "Details")
-            btn->triggerClick();
+    for (auto* layer : editor->getChildren())
+        for (auto* c : layer->getChildren())
+            if (auto* btn = dynamic_cast<juce::TextButton*> (c); btn != nullptr && btn->getButtonText() == "Details")
+                btn->triggerClick();
     pump (300);
     snapshot (*editor, outDir.getChildFile ("4-advanced.png"));
 
@@ -521,8 +522,8 @@ int main (int argc, char* argv[])
     {
         auto setP = [&] (const char* id, float v) { auto* p = proc->apvts.getParameter (id); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
         proc->apvts.getParameter ("limiter")->setValueNotifyingHost (1.0f);
-        const auto before = measure ("PREP off, Blend 60 % (baseline)");
-        check (std::abs (before.first - refLoud (refBright)) < 1.0, "Blend 60 %: loudness still matches the reference");
+        const auto before = measure ("PREP off, EQ smoothing 60 % (baseline)");
+        check (std::abs (before.first - refLoud (refBright)) < 1.0, "EQ smoothing 60 %: loudness still matches the reference");
         setP ("unclump", 100.0f);
         setP ("monoBase", 120.0f);
         const double t0 = juce::Time::getMillisecondCounterHiRes();

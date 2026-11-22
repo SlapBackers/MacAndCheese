@@ -140,11 +140,6 @@ void DropZone::filesDropped (const juce::StringArray& files, int, int)
 
 // ================================================================== LearnButton
 
-bool LearnButton::isEnabledForClick() const
-{
-    return state != MacAndCheeseProcessor::LearnState::analysing;
-}
-
 void LearnButton::paint (juce::Graphics& g)
 {
     using LS = MacAndCheeseProcessor::LearnState;
@@ -180,7 +175,7 @@ void LearnButton::paint (juce::Graphics& g)
 
 void LearnButton::mouseUp (const juce::MouseEvent& e)
 {
-    if (getLocalBounds().contains (e.getPosition()) && isEnabledForClick() && onClick)
+    if (getLocalBounds().contains (e.getPosition()) && state != MacAndCheeseProcessor::LearnState::analysing && onClick)
         onClick();
 }
 
@@ -449,6 +444,16 @@ MacAndCheeseEditor::MacAndCheeseEditor (MacAndCheeseProcessor& p) : AudioProcess
     info.setColour (juce::Label::textColourId, colours::dim);
     addAndMakeVisible (info);
 
+    // move every control into the scaled content layer
+    for (auto* c : juce::Array<juce::Component*> (getChildren().begin(), getChildren().size()))
+    {
+        removeChildComponent (c);
+        content.addChildComponent (c); // keeps each child's own visibility
+    }
+    content.setInterceptsMouseClicks (false, true);
+    content.setTransform (juce::AffineTransform::scale (uiScale));
+    addAndMakeVisible (content);
+
     setDetails (false);
     startTimerHz (30);
 }
@@ -468,12 +473,15 @@ void MacAndCheeseEditor::setDetails (bool on)
         panel.insert (panel.end(), { &k.slider, &k.name, &k.value });
     for (auto* c : panel)
         c->setVisible (on);
-    setSize (on ? mainWidth + detailsWidth : mainWidth, height);
+    const int w = on ? mainWidth + detailsWidth : mainWidth;
+    content.setBounds (0, 0, w, height);
+    setSize (juce::roundToInt (w * uiScale), juce::roundToInt (height * uiScale));
 }
 
 void MacAndCheeseEditor::paint (juce::Graphics& g)
 {
     g.fillAll (colours::bg);
+    g.addTransform (juce::AffineTransform::scale (uiScale)); // same drawing as the full-size layout
     auto header = getLocalBounds().removeFromTop (56).reduced (20, 0);
     g.setColour (colours::text);
     g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
@@ -482,7 +490,7 @@ void MacAndCheeseEditor::paint (juce::Graphics& g)
     g.setFont (juce::FontOptions (12.0f));
     g.drawText ("your mac, their cheese", header.withTrimmedLeft (196), juce::Justification::centredLeft);
     g.setColour (colours::line);
-    g.drawHorizontalLine (56, 0.0f, (float) getWidth());
+    g.drawHorizontalLine (56, 0.0f, (float) content.getWidth());
     g.drawHorizontalLine (topBottom, 20.0f, mainWidth - 20.0f);
     g.drawVerticalLine (290, topBottom + 10.0f, height - 50.0f);
     g.drawVerticalLine (540, topBottom + 10.0f, height - 50.0f);
@@ -494,7 +502,7 @@ void MacAndCheeseEditor::paint (juce::Graphics& g)
     if (details)
     {
         g.setColour (colours::line);
-        g.drawVerticalLine (mainWidth, 56.0f, (float) getHeight());
+        g.drawVerticalLine (mainWidth, 56.0f, (float) content.getHeight());
         g.setColour (colours::accent);
         g.drawText ("DETAILS", mainWidth + 20, 66, 200, 16, juce::Justification::left);
         g.drawText ("1   Unclump per band", mainWidth + 20, 382, 300, 16, juce::Justification::left);
