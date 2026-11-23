@@ -4,6 +4,7 @@ project(MacAndCheese VERSION 2.2.2)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>") # Windows: no VC++ redistributable needed
 
 add_subdirectory(libs/JUCE)
 
@@ -57,6 +58,7 @@ target_link_libraries(MacAndCheeseCLI
 
 # ---------------------------------------------------------------- end-to-end plugin test (no DAW)
 juce_add_gui_app(MacAndCheeseFlowTest PRODUCT_NAME "MacAndCheeseFlowTest")
+set_target_properties(MacAndCheeseFlowTest PROPERTIES WIN32_EXECUTABLE FALSE) # plain main(), console output
 target_sources(MacAndCheeseFlowTest PRIVATE Tools/flowtest.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp ${CORE_SOURCES})
 target_include_directories(MacAndCheeseFlowTest PRIVATE Source)
 target_compile_definitions(MacAndCheeseFlowTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_PLUGINHOST_VST3=1)
