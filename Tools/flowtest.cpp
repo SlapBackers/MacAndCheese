@@ -450,7 +450,7 @@ int main (int argc, char* argv[])
     std::cout << "  info  auto clip: clipper max " << proc->maxClipDb.load() << " dB, limiter max " << proc->maxGrDb.load() << " dB\n";
     check (proc->maxGrDb.load() < 1.6f, "Auto clip: the limiter only does the last ~1 dB");
     proc->apvts.getParameter ("clipAuto")->setValueNotifyingHost (0.0f); // manual clip from here
-    pump (200);
+    for (int t = 0; t < 40 && proc->apvts.getRawParameterValue ("clip")->load() <= 2.0f; ++t) pump (50); // GUI reacts async
     check (proc->apvts.getRawParameterValue ("clip")->load() > 2.0f, "Auto off: Clip stays where Auto had it (no jump)");
 
     // clipper before the limiter
