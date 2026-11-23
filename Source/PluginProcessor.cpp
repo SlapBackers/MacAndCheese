@@ -323,7 +323,7 @@ void MacAndCheeseProcessor::loadReference (int slot, const juce::File& file)
             if (reader == nullptr)
                 throw std::runtime_error ("this file format can't be read.");
 
-            const auto len = (int) juce::jmin<juce::int64> (reader->lengthInSamples,
+            const auto len = (int) std::min<juce::int64> (reader->lengthInSamples,
                                                             (juce::int64) (maxReferenceSeconds * reader->sampleRate));
             juce::AudioBuffer<float> raw ((int) juce::jmax (1u, reader->numChannels), len);
             reader->read (&raw, 0, len, 0, true, true);
