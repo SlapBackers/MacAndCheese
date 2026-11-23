@@ -164,17 +164,17 @@ int prepTest()
     check (maxSame < 1.5f, "Unclump leaves a mix that already matches the reference (max cut " + juce::String (maxSame, 1) + " dB)");
     check (fixed.second[3] < 1.5f && fixed.second[4] < 1.5f, "Unclump leaves healthy bands alone (Bite/Fizz)");
     {
-        // Allow boosts: a steady mix against a reference whose mud swells -> Unclump lifts the mud
+        // Max boost: a steady mix against a reference whose mud swells -> Unclump lifts the mud
         mm::Prep p;
         p.prepare (sr, 512);
         p.setStats (rs, ts);
         mm::PrepSettings set;
         set.amount = 1.0f;
-        set.fluff = true;
+        set.maxBoostDb = 3.0f;
         auto x = ref;
         p.process (x.first.data(), x.second.data(), n, set);
         const float up = p.popBoost()[1];
-        check (up > 1.0f && up <= 3.0f, "Allow boosts: lifts a band up to +3 dB (Mud +" + juce::String (up, 1) + " dB)");
+        check (up > 1.0f && up <= 3.0f, "Max boost 3 dB: lifts a band, no more than +3 dB (Mud +" + juce::String (up, 1) + " dB)");
     }
     return failures;
 }

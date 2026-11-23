@@ -6,7 +6,7 @@
     so song dynamics are left alone and a swelling band isn't hidden by the mix swelling with it.
     Learning stores where that relative level usually sits (percentiles) in the track and in a reference;
     when the track's band climbs further above its usual level than the reference's ever does (mud building
-    up, harsh cymbal hits), it is pulled down to the reference's spread. Cut-only unless "Allow boosts" (param "fluff") permits +3 dB.
+    up, harsh cymbal hits), it is pulled down to the reference's spread. Cut-only unless Max boost (0-6 dB) allows lifting a band.
 
     Mono base: side high-pass (24 dB/oct) = mono low end below the chosen frequency.
     The same class runs live and offline (to analyse, and to match the master on the prepped track).
@@ -35,7 +35,7 @@ struct PrepSettings
 {
     float amount = 0.0f;                      // Unclump 0..1
     std::array<float, prepBands> bands { 1, 1, 1, 1, 1 }; // 1 = match the reference, up to 2
-    bool fluff = false;
+    float maxBoostDb = 0.0f;                  // 0 = cut only
     float monoHz = 0.0f;                      // < 20 = off
     bool active() const noexcept { return amount > 0.0f || monoHz >= 20.0f; }
 };
@@ -116,7 +116,7 @@ public:
                         if (has && set.amount > 0.0f)
                         {
                             const float rel = relDb (env[(size_t) c][(size_t) b], mixEnv);
-                            g = juce::jlimit (-18.0f, set.fluff ? 3.0f : 0.0f, map (c, b, rel) * set.amount * set.bands[(size_t) b]);
+                            g = juce::jlimit (-18.0f, set.maxBoostDb, map (c, b, rel) * set.amount * set.bands[(size_t) b]);
                         }
                         gainTarget[(size_t) c][(size_t) b] = juce::Decibels::decibelsToGain (g);
                         reduction[(size_t) b] = juce::jmax (reduction[(size_t) b], -g);
@@ -142,7 +142,7 @@ public:
 
     // max reduction per band (dB) since the last call
     std::array<float, prepBands> popReduction() noexcept { auto r = reduction; reduction = {}; return r; }
-    std::array<float, prepBands> popBoost() noexcept { auto r = boost; boost = {}; return r; } // "Allow boosts"
+    std::array<float, prepBands> popBoost() noexcept { auto r = boost; boost = {}; return r; }
 
     // offline: band-level statistics of a mid/side signal (same detectors as live)
     static BandStats analyse (const std::vector<float>& mid, const std::vector<float>& side, double rate)

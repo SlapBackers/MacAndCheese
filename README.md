@@ -10,13 +10,23 @@ A free VST3 plugin for reference mastering, based on [Matchering](https://github
 
 ### [Download the VST3 plugin for macOS](https://github.com/SlapBackers/MacAndCheese/releases/latest/download/Mac-and-Cheese-VST3-plugin-macOS.zip)
 
-Always the latest version, Apple Silicon and Intel. Windows and Linux are coming in v2.2.3.
+Always the latest version, Apple Silicon and Intel.
+
+### [Download the VST3 plugin for Windows](https://github.com/SlapBackers/MacAndCheese/releases/latest/download/Mac-and-Cheese-VST3-plugin-Windows.zip) · [Linux](https://github.com/SlapBackers/MacAndCheese/releases/latest/download/Mac-and-Cheese-VST3-plugin-Linux.zip)
+
+64-bit. **New and not yet tested in a DAW**: the automatic tests pass, but please [tell us](https://github.com/SlapBackers/MacAndCheese/issues) if it works for you.
+
+**macOS**:
 
 1. Unzip it: you get **`Mac and Cheese.vst3`**.
 2. Move it to `~/Library/Audio/Plug-Ins/VST3` (in Finder: Go → Go to Folder…, paste the path).
 3. Rescan plugins in your DAW.
 
-If your DAW doesn't list it (macOS blocks plugins that Apple hasn't notarised), run this once in Terminal:
+**Windows**: unzip and move `Mac and Cheese.vst3` to `C:\Program Files\Common Files\VST3`. Windows may warn about an unknown publisher (the plugin isn't signed yet).
+
+**Linux**: unzip and move `Mac and Cheese.vst3` to `~/.vst3`.
+
+On macOS, if your DAW doesn't list it (macOS blocks plugins that Apple hasn't notarised), run this once in Terminal:
 
 ```bash
 xattr -dr com.apple.quarantine "$HOME/Library/Audio/Plug-Ins/VST3/Mac and Cheese.vst3"
@@ -39,7 +49,9 @@ The plugin follows the signal in three steps:
 | **3 Loudness** | Clip → Gain → Limiter | Each knob is **Auto** or manual. Auto clip shaves the peaks, auto gain matches the reference's loudness, auto limiter holds −1 dBTP. With the limiter off, the plugin tells you how much to push into your own limiter. |
 
 - **Level match**: hear the result at your track's own loudness, the fair comparison (louder always sounds better).
-- **Details**: EQ curve, Linear / Natural EQ, Mid / Side EQ, EQ smoothing, Max EQ, Unclump per band (50 % = match the reference, up to 2×), Allow boosts.
+- **Details**: EQ curve, Linear / Natural EQ, Mid / Side EQ, EQ smoothing, Max EQ, Unclump per band (50 % = match the reference, up to 2×), Max boost.
+
+How each part works, in more depth: **[How it works](docs/HOW-IT-WORKS.md)**.
 
 Re-learn after big mix changes. References and the learned match are saved with your project; loading a *new* reference after reopening needs a new Learn.
 
@@ -60,7 +72,7 @@ Latency is reported to the host: about 95 ms at 48 kHz in Linear mode, about 10 
 
 ## Build from source
 
-Needs CMake ≥ 3.22 and the Xcode command line tools.
+Needs CMake ≥ 3.22 and a C++17 compiler (Xcode command line tools, Visual Studio 2022, or GCC on Linux with the [JUCE dependencies](https://github.com/juce-framework/JUCE/blob/master/docs/Linux%20Dependencies.md)). GitHub Actions builds and tests all three on every push ([build.yml](.github/workflows/build.yml)).
 
 ```bash
 git clone --recurse-submodules https://github.com/SlapBackers/MacAndCheese.git

@@ -19,6 +19,7 @@ class MacAndCheeseProcessor : public juce::AudioProcessor, private juce::Timer
 {
 public:
     static constexpr int numSlots = 3;
+    static constexpr float clipRangeDb = 9.0f; // Clip knob and Auto clip maximum
     enum class LearnState { idle, listening, analysing };
 
     MacAndCheeseProcessor();
@@ -196,7 +197,7 @@ private:
     std::atomic<float>* pLevelMatch = nullptr;
     std::atomic<float>* pUnclump = nullptr;
     std::atomic<float>* pMonoBase = nullptr;
-    std::atomic<float>* pFluff = nullptr;
+    std::atomic<float>* pMaxBoost = nullptr;
     std::array<std::atomic<float>*, mm::prepBands> pBand {};
     std::atomic<float>* pProfile = nullptr;
 

@@ -38,7 +38,7 @@ MacAndCheeseProcessor::MacAndCheeseProcessor()
     pLevelMatch = apvts.getRawParameterValue ("levelMatch");
     pUnclump = apvts.getRawParameterValue ("unclump");
     pMonoBase = apvts.getRawParameterValue ("monoBase");
-    pFluff = apvts.getRawParameterValue ("fluff");
+    pMaxBoost = apvts.getRawParameterValue ("maxBoost");
     for (int b = 0; b < mm::prepBands; ++b)
         pBand[(size_t) b] = apvts.getRawParameterValue (bandIds[b]);
     pProfile = apvts.getRawParameterValue ("profile");
@@ -73,7 +73,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MacAndCheeseProcessor::creat
     for (int b = 0; b < mm::prepBands; ++b)
         l.add (std::make_unique<F> (juce::ParameterID { bandIds[b], 1 }, bandNames[b], percent, 50.0f, // 50 % = match the reference
                                     juce::AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return std::abs (v - 50.0f) < 0.5f ? juce::String ("match") : juce::String (juce::roundToInt (v)) + " %"; })));
-    l.add (std::make_unique<B> (juce::ParameterID { "fluff", 1 }, "Allow Boosts", false));
+    l.add (std::make_unique<F> (juce::ParameterID { "maxBoost", 1 }, "Max Boost", juce::NormalisableRange<float> (0.0f, 6.0f, 0.1f), 0.0f, db));
     l.add (std::make_unique<Ch> (juce::ParameterID { "profile", 1 }, "Profile", slotNames, 0));
     // EQ
     l.add (std::make_unique<F> (juce::ParameterID { "midEq", 1 }, "Mid EQ", percent, 100.0f, pct));
@@ -83,7 +83,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MacAndCheeseProcessor::creat
     l.add (std::make_unique<Ch> (juce::ParameterID { "eqMode", 1 }, "EQ Mode", juce::StringArray { "Linear", "Natural" }, 0));
     // loudness: clipper -> gain -> limiter, each automatic or manual
     l.add (std::make_unique<B> (juce::ParameterID { "clipAuto", 1 }, "Clip Auto", true));
-    l.add (std::make_unique<F> (juce::ParameterID { "clip", 1 }, "Clip", juce::NormalisableRange<float> (0.0f, 6.0f, 0.1f), 0.0f, db));
+    l.add (std::make_unique<F> (juce::ParameterID { "clip", 1 }, "Clip", juce::NormalisableRange<float> (0.0f, clipRangeDb, 0.1f), 0.0f, db));
     l.add (std::make_unique<B> (juce::ParameterID { "gainAuto", 1 }, "Gain Auto", true));
     l.add (std::make_unique<F> (juce::ParameterID { "gain", 1 }, "Gain", juce::NormalisableRange<float> (-12.0f, 36.0f, 0.1f), 0.0f, db));
     l.add (std::make_unique<B> (juce::ParameterID { "ceilingAuto", 1 }, "Ceiling Auto", true));
@@ -180,7 +180,7 @@ void MacAndCheeseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // the limiter; auto = everything above the last 1 dB of limiting (max 6 dB).
     float preDb = gainAuto ? activeGainDb.load() * match : pGain->load();
     float postDb = activeRefDb.load() * match;
-    float clipDb = ! matched ? 0.0f : clipAuto ? juce::jlimit (0.0f, 6.0f, estPeakDb + preDb - ceilingDb - 1.0f) : pClip->load() * match;
+    float clipDb = ! matched ? 0.0f : clipAuto ? juce::jlimit (0.0f, clipRangeDb, estPeakDb + preDb - ceilingDb - 1.0f) : pClip->load() * match;
     float floorDb = ceilingDb; // the clipper never clips below this
     if (! limOn)
     {
@@ -193,7 +193,7 @@ void MacAndCheeseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
             const float targetDb = preDb + activeRefDb.load() * match;
             const float peakDb = exactPeakValid.load() ? exactPeakDb.load() : estPeakDb + 2.0f; // estimate + margin until measured
             if (clipAuto)
-                clipDb = juce::jlimit (0.0f, 6.0f, targetDb - (floorDb - peakDb));
+                clipDb = juce::jlimit (0.0f, clipRangeDb, targetDb - (floorDb - peakDb));
             const float topDb = clipDb > 0.01f ? floorDb : ceilingDb;
             preDb = juce::jmin (targetDb, topDb - peakDb + clipDb);
             suggestionDb.store (juce::jmax (0.0f, targetDb - preDb));
@@ -564,7 +564,7 @@ mm::PrepSettings MacAndCheeseProcessor::prepSettings() const
     mm::PrepSettings s;
     s.amount = pUnclump->load() * 0.01f;
     s.monoHz = pMonoBase->load();
-    s.fluff = pFluff->load() > 0.5f;
+    s.maxBoostDb = pMaxBoost->load();
     for (int b = 0; b < mm::prepBands; ++b)
         s.bands[(size_t) b] = pBand[(size_t) b]->load() / 50.0f; // 50 % = 1x (match), 100 % = 2x
     return s;
@@ -689,7 +689,7 @@ void MacAndCheeseProcessor::timerCallback()
         applyActiveSlot();
 
     const auto ps = prepSettings();
-    juce::String key = juce::String (ps.amount, 2) + ":" + juce::String ((int) ps.monoHz) + ":" + juce::String (active) + ":" + juce::String ((int) ps.fluff);
+    juce::String key = juce::String (ps.amount, 2) + ":" + juce::String ((int) ps.monoHz) + ":" + juce::String (active) + ":" + juce::String (ps.maxBoostDb, 1);
     for (auto b : ps.bands) key << ":" << juce::String (b, 2);
     // Max EQ and EQ smoothing change the EQ, so the loudness match must follow them too
     key << ":" << juce::String (pMaxCorr->load(), 1) << ":" << juce::String (pSmoothing->load(), 1);

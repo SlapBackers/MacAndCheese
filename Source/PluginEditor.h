@@ -84,7 +84,8 @@ namespace ui
     class BandMeter : public juce::Component
     {
     public:
-        std::array<float, mm::prepBands> db {}, boost {}; // cut (0-18 dB, down), boost (0-3 dB, up)
+        std::array<float, mm::prepBands> db {}, boost {}; // cut (0-18 dB, down), boost (0-maxBoost dB, up)
+        float maxBoost = 0; // 0 = cut only, no boost zone
         void paint (juce::Graphics&) override;
     };
 }
@@ -152,8 +153,9 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAtt;
     Knob midEq, sideEq, smoothing, maxEq;
     std::array<Knob, mm::prepBands> bands;
-    juce::ToggleButton boostsButton { "Allow boosts (+3 dB)" };
-    std::unique_ptr<ButtonAtt> boostsAtt;
+    juce::Label maxBoostLabel { {}, "MAX BOOST" };
+    juce::Slider maxBoost { juce::Slider::LinearBar, juce::Slider::TextBoxRight };
+    std::unique_ptr<Attachment> maxBoostAtt;
     juce::Label info;
 
     // everything is laid out at full size inside `content`, then drawn at uiScale so it fits laptop screens

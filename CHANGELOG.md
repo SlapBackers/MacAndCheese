@@ -2,6 +2,13 @@
 
 Download the plugin from the [Releases page](https://github.com/SlapBackers/MacAndCheese/releases).
 
+## v2.2.3 — Windows and Linux
+
+- **Windows and Linux builds**, next to macOS. GitHub builds and tests all three on every release; the Windows and Linux builds are new and **not yet tested in a DAW**: feedback welcome.
+- **Max boost** (Details, 0–6 dB) replaces "Allow boosts": how far Unclump may lift a band that dips below the reference. 0 dB = cut only. Projects saved with "Allow boosts" on open at 0 dB: set Max boost to 3 dB for the old behaviour.
+- **Clip up to 9 dB** (knob and Auto).
+- New **[How it works](docs/HOW-IT-WORKS.md)** page.
+
 ## v2.2.2 — comfort
 
 - **Smaller window**: 756 × 470 (1092 × 470 with Details), fits laptop screens with the DAW around it.

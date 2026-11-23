@@ -21,7 +21,7 @@ Plain names for now; fun names come back later as hover explanations.
 | `unclump` | Unclump | 0–100 % | 0 % | 1 Fix the mix |
 | `monoBase` | Mono bass | Off, 20–300 Hz | Off | 1 Fix the mix |
 | `match` | Match | 0–100 % | 100 % | 2 Match (hero knob) |
-| `clip` / `clipAuto` | Clip | 0–6 dB / Auto | Auto | 3 Loudness |
+| `clip` / `clipAuto` | Clip | 0–9 dB / Auto | Auto | 3 Loudness |
 | `gain` / `gainAuto` | Gain | −12…+36 dB / Auto | Auto | 3 Loudness |
 | `ceiling` / `ceilingAuto` | Limiter (ceiling) | −6…0 dB / Auto (−1 dBTP) | Auto | 3 Loudness |
 | `limiter` | Limiter on | on / off | on | 3 Loudness |
@@ -32,7 +32,7 @@ Plain names for now; fun names come back later as hover explanations.
 | `smoothing` | EQ smoothing | 0–100 % | 0 % | Details |
 | `maxCorr` | Max EQ | 3–24 dB | 12 dB | Details |
 | `bandBottom` … `bandFizz` | Unclump per band | 0–100 % (50 % = match) | 50 % | Details |
-| `fluff` | Allow boosts (+3 dB) | on / off | off | Details |
+| `maxBoost` | Max boost (Unclump) | 0–6 dB (0 = cut only) | 0 dB | Details |
 
 Auto switches: switching one off leaves its knob at the value Auto was using. "Auto all" switches all three on.
 
@@ -78,7 +78,6 @@ Message examples: "Drop up to 3 mastered songs into A, B, C - then press Learn a
 
 ## Coming before v3.0 (leave room, don't detail yet)
 
-- **v2.2.3**: "Allow boosts" becomes a **Max boost** knob (0–6 dB); Clip goes up to 9 dB.
 - **v2.3 Tame**: knob (50 % = match), delta listen switch, reduction display, in 1 Fix the mix.
 - **v2.4 Character**: a stage between Match and Loudness (Punch, Sag, Drive + console type, Tone).
 - **v2.5**: presets, A+B+C average, "Fix with" reference.
