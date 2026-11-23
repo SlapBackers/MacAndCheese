@@ -59,8 +59,8 @@ void LookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, int 
         g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre (dot));
         g.setColour (colours::text);
         g.setFont (juce::FontOptions (size * 0.15f, juce::Font::bold));
-        g.drawText (juce::String (juce::roundToInt (s.getValue())) + "%", area.withSizeKeepingCentre (body * 1.4f, body * 0.6f),
-                    juce::Justification::centred);
+        g.drawFittedText (juce::String (juce::roundToInt (s.getValue())) + "%", area.withSizeKeepingCentre (body * 1.4f, body * 0.6f).toNearestInt(),
+                          juce::Justification::centred, 1, 0.7f); // shrinks rather than "100..." with wider fonts
     }
     else
     {
